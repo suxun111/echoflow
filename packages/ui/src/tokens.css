@@ -1,0 +1,19 @@
+:root {
+  --ol-primary: #7657e8;
+  --ol-primary-dark: #5e42d2;
+  --ol-primary-soft: #eeeafd;
+  --ol-ink: #252337;
+  --ol-muted: #89869b;
+  --ol-line: #e8e6f0;
+  --ol-panel: #ffffff;
+  --ol-bg: #f6f6fb;
+  --ol-radius-sm: 8px;
+  --ol-radius-md: 12px;
+  --ol-radius-lg: 18px;
+}
+
+.ol-status { display: inline-flex; align-items: center; padding: 4px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+.ol-status--purple { color: #6545d7; background: #eeeafd; }
+.ol-status--green { color: #1f8461; background: #e8f7f1; }
+.ol-status--orange { color: #a76019; background: #fff2de; }
+.ol-status--red { color: #b84c5d; background: #fdecef; }

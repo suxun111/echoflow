@@ -1,0 +1,20 @@
+{
+  "name": "@online-learning/database",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "scripts": {
+    "generate": "prisma generate",
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "migrate": "prisma migrate dev",
+    "seed": "tsx prisma/seed.ts"
+  },
+  "optionalDependencies": { "@prisma/client": "6.10.1", "prisma": "6.10.1" },
+  "devDependencies": { "@types/node": "^22.15.32", "tsx": "^4.20.3", "typescript": "^5.8.3", "vitest": "^3.2.4" },
+  "prisma": { "seed": "tsx prisma/seed.ts" }
+}

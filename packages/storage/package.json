@@ -1,0 +1,16 @@
+{
+  "name": "@online-learning/storage",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run --passWithNoTests",
+    "lint": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": { "minio": "^8.0.5" },
+  "devDependencies": { "@types/node": "^22.15.32", "typescript": "^5.8.3", "vitest": "^3.2.4" }
+}

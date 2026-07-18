@@ -1,0 +1,5 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": { "tsBuildInfoFile": "./node_modules/.tmp/app.tsbuildinfo", "lib": ["ES2022", "DOM", "DOM.Iterable"], "jsx": "react-jsx", "noEmit": true, "declaration": false },
+  "include": ["src"]
+}

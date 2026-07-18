@@ -1,0 +1,19 @@
+{
+  "name": "@online-learning/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "lint": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@online-learning/config": "workspace:*",
+    "@online-learning/contracts": "workspace:*",
+    "bullmq": "^5.56.2",
+    "ioredis": "^5.6.1"
+  },
+  "devDependencies": { "@types/node": "^22.15.32", "tsx": "^4.20.3", "typescript": "^5.8.3", "vitest": "^3.2.4" }
+}

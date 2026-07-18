@@ -1,0 +1,7 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap');
+@import './styles/base.css';
+@import './styles/layout.css';
+@import './styles/library.css';
+@import './styles/study.css';
+@import './styles/uploads.css';
+@import './styles/responsive.css';

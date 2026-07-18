@@ -1,0 +1,10 @@
+import { Icon } from '../../components/Icon'
+import { libraryVideos } from '../../data/library'
+
+export function UploadModal({ onClose, onOpenUploads }: { onClose: () => void; onOpenUploads: () => void }) {
+  return <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="upload-modal"><button className="modal-close" onClick={onClose}><Icon name="close"/></button><span className="modal-icon"><Icon name="sparkles" size={25}/></span><p className="modal-kicker">AI PRIVATE LESSON</p><h2>上传你的英语视频</h2><p className="modal-intro">我们会自动生成逐句英文字幕、中文翻译和重点词汇。课程仅你自己可见。</p><button className="drop-zone"><Icon name="upload" size={28}/><strong>拖放视频到这里</strong><span>或点击选择 MP4、MOV 文件，最大 2GB</span></button><div className="processing-flow"><span><b>1</b>上传转码</span><i/><span><b>2</b>AI 语音识别</span><i/><span><b>3</b>翻译与分句</span></div><label className="rights-check"><input type="checkbox"/>我确认拥有该视频的学习和处理权限</label><div className="modal-footer"><button onClick={onClose}>取消</button><button className="purple" onClick={onOpenUploads}>查看处理任务</button></div></section></div>
+}
+
+export function UploadsPage({ onUpload }: { onUpload: () => void }) {
+  return <main className="simple-page"><div className="simple-heading"><div><p>MY PRIVATE COURSES</p><h1>个人上传</h1><span>你上传的视频和 AI 生成课程仅自己可见。</span></div><button onClick={onUpload}><Icon name="upload"/>上传新视频</button></div><section className="processing-card"><div className="processing-cover" style={{ backgroundImage: `url(${libraryVideos[5].cover})` }}><span>处理中</span></div><div className="processing-info"><span><Icon name="sparkles" size={15}/> AI 正在生成课程</span><h3>My weekend road trip.mp4</h3><p>语音识别已完成，正在翻译和智能分句…</p><div className="task-progress"><i style={{ width: '68%' }}/></div><small>68% · 预计还需 2 分钟</small></div><button className="more">•••</button></section><section className="upload-guide"><span className="modal-icon"><Icon name="sparkles" size={28}/></span><h2>从视频到课程，只需一次上传</h2><p>自动转写、双语翻译、逐句时间轴和重点词汇都会为你准备好。</p></section></main>
+}

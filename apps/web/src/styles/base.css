@@ -1,0 +1,4 @@
+:root {   color: #252337;   background: #f5f5fb;   font-family: 'DM Sans', 'Noto Sans SC', system-ui, sans-serif;   font-synthesis: none;   --purple: #7657e8;   --purple-dark: #5e42d2;   --purple-soft: #eeeafd;   --ink: #252337;   --muted: #89869b;   --line: #e8e6f0;   --panel: #fff; }  * { box-sizing: border-box; } html { scroll-behavior: smooth; } body { min-width: 320px; margin: 0; background: #f6f6fb; } button, input { font: inherit; } button { cursor: pointer; } button:disabled { cursor: not-allowed; opacity: .4; } button, input { outline-color: var(--purple); } h1, h2, h3, p { margin-top: 0; }
+
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } } @keyframes pulse { 50% { opacity: .35; } }
+.route-loading { min-height: 45vh; display: grid; place-items: center; color: var(--muted); font-size: 12px; }
