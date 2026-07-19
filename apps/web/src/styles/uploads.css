@@ -1,2 +1,330 @@
-.modal-backdrop { position: fixed; z-index: 100; inset: 0; display: grid; place-items: center; padding: 20px; background: #1e193963; backdrop-filter: blur(8px); animation: fadeIn .2s ease; }.upload-modal { position: relative; width: min(520px, 100%); padding: 32px 34px 25px; border-radius: 19px; background: #fff; box-shadow: 0 25px 80px #21184f4d; text-align: center; }.modal-close { position: absolute; top: 14px; right: 14px; width: 30px; height: 30px; display: grid; place-items: center; border: 0; border-radius: 8px; background: #f5f4f8; color: #8c8898; }.modal-icon { width: 51px; height: 51px; margin: auto; display: grid; place-items: center; color: var(--purple); background: var(--purple-soft); border-radius: 15px; }.modal-kicker { margin: 16px 0 6px; color: var(--purple); font-size: 8px; font-weight: 750; letter-spacing: .14em; }.upload-modal h2 { margin-bottom: 8px; font-size: 23px; }.modal-intro { max-width: 375px; margin: 0 auto 20px; color: var(--muted); font-size: 10px; line-height: 1.6; }.drop-zone { width: 100%; height: 145px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: var(--purple); background: #faf9ff; border: 1.5px dashed #bfb2ef; border-radius: 13px; }.drop-zone strong { color: #4d485a; font-size: 12px; }.drop-zone span { color: #9995a4; font-size: 9px; }.drop-zone:hover { background: #f5f1ff; border-color: var(--purple); }.processing-flow { margin: 20px 3px; display: flex; align-items: center; justify-content: center; gap: 7px; }.processing-flow span { display: flex; align-items: center; gap: 5px; color: #858090; font-size: 8px; white-space: nowrap; }.processing-flow b { width: 19px; height: 19px; display: grid; place-items: center; border-radius: 50%; color: var(--purple); background: var(--purple-soft); font-size: 8px; }.processing-flow i { width: 22px; height: 1px; background: #ded9ea; }.rights-check { display: flex; align-items: center; justify-content: center; gap: 6px; color: #858191; font-size: 9px; }.rights-check input { accent-color: var(--purple); }.modal-footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; padding-top: 17px; border-top: 1px solid var(--line); }.modal-footer button { height: 35px; padding: 0 14px; border: 1px solid var(--line); border-radius: 8px; color: #777283; background: #fff; font-size: 10px; }.modal-footer button.purple { color: #fff; background: var(--purple); border-color: var(--purple); }
-.simple-page { padding: 45px 42px 70px; max-width: 1250px; margin: 0 auto; }.simple-heading { display: flex; justify-content: space-between; align-items: end; margin-bottom: 30px; }.simple-heading h1 { margin: 0 0 7px; font-size: 30px; }.simple-heading span { color: var(--muted); font-size: 11px; }.simple-heading > button { height: 40px; padding: 0 14px; display: flex; align-items: center; gap: 7px; color: #fff; background: var(--purple); border: 0; border-radius: 10px; font-size: 11px; }.processing-card { position: relative; padding: 15px; display: grid; grid-template-columns: 180px 1fr auto; gap: 20px; align-items: center; background: #fff; border: 1px solid var(--line); border-radius: 15px; }.processing-cover { height: 108px; border-radius: 10px; background-size: cover; background-position: center; }.processing-cover span { display: inline-block; margin: 9px; padding: 5px 7px; border-radius: 6px; color: #fff; background: #7657e8e8; font-size: 8px; }.processing-info > span { display: flex; align-items: center; gap: 5px; color: var(--purple); font-size: 9px; font-weight: 650; }.processing-info h3 { margin: 7px 0 4px; font-size: 15px; }.processing-info p { color: var(--muted); margin-bottom: 12px; font-size: 10px; }.task-progress { max-width: 500px; height: 5px; background: #ece9f5; border-radius: 3px; }.task-progress i { display: block; height: 100%; background: linear-gradient(90deg, var(--purple), #a18af4); border-radius: inherit; }.processing-info small { display: block; color: #aaa6b4; margin-top: 6px; font-size: 8px; }.more { border: 0; background: transparent; color: #9b97a5; }.upload-guide, .simple-placeholder { margin-top: 20px; padding: 65px 20px; text-align: center; background: #fff; border: 1px dashed #dcd8e8; border-radius: 15px; }.upload-guide .modal-icon, .simple-placeholder .modal-icon { margin-bottom: 15px; }.upload-guide h2, .simple-placeholder h2 { font-size: 17px; margin-bottom: 7px; }.upload-guide p, .simple-placeholder p { color: var(--muted); font-size: 10px; }
+.modal-backdrop {
+  position: fixed;
+  z-index: 100;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background:
+    radial-gradient(circle, rgba(255, 217, 61, .28) 1px, transparent 1.5px),
+    rgba(23, 23, 23, .58);
+  background-size: 14px 14px, 100% 100%;
+  animation: fadeIn .2s ease;
+}
+
+.upload-modal {
+  position: relative;
+  width: min(520px, 100%);
+  padding: 32px 34px 25px;
+  border: 3px solid var(--ink);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: 8px 8px 0 var(--ink);
+  text-align: center;
+}
+
+.modal-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: 2px solid var(--ink);
+  border-radius: 7px;
+  background: #fff;
+  color: var(--ink);
+}
+
+.modal-icon {
+  width: 52px;
+  height: 52px;
+  margin: auto;
+  display: grid;
+  place-items: center;
+  color: var(--ink);
+  background: var(--pop-yellow);
+  border: 2px solid var(--ink);
+  border-radius: 8px;
+  box-shadow: 4px 4px 0 var(--ink);
+}
+
+.modal-kicker {
+  margin: 16px 0 6px;
+  color: var(--pop-blue);
+  font-family: var(--display);
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.upload-modal h2 {
+  margin-bottom: 8px;
+  font-size: 24px;
+  font-weight: 800;
+}
+
+.modal-intro {
+  max-width: 375px;
+  margin: 0 auto 20px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.6;
+}
+
+.drop-zone {
+  width: 100%;
+  height: 145px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--ink);
+  background: #fff;
+  border: 3px dashed var(--ink);
+  border-radius: 8px;
+}
+
+.drop-zone strong {
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.drop-zone span {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.drop-zone:hover {
+  background: var(--pop-cyan);
+}
+
+.processing-flow {
+  margin: 20px 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+}
+
+.processing-flow span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--ink);
+  font-size: 8px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.processing-flow b {
+  width: 21px;
+  height: 21px;
+  display: grid;
+  place-items: center;
+  border: 2px solid var(--ink);
+  border-radius: 50%;
+  color: var(--ink);
+  background: var(--pop-yellow);
+  font-size: 8px;
+}
+
+.processing-flow i {
+  width: 22px;
+  height: 2px;
+  background: var(--ink);
+}
+
+.rights-check {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.rights-check input {
+  accent-color: var(--pop-red);
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+  padding-top: 17px;
+  border-top: 2px solid var(--ink);
+}
+
+.modal-footer button {
+  height: 35px;
+  padding: 0 14px;
+  border: 2px solid var(--ink);
+  border-radius: 8px;
+  color: var(--ink);
+  background: #fff;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.modal-footer button.purple {
+  color: var(--ink);
+  background: var(--pop-yellow);
+  border-color: var(--ink);
+  box-shadow: 3px 3px 0 var(--ink);
+}
+
+.simple-page {
+  padding: 45px 42px 70px;
+  max-width: 1250px;
+  margin: 0 auto;
+}
+
+.simple-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: end;
+  margin-bottom: 30px;
+}
+
+.simple-heading h1 {
+  margin: 0 0 7px;
+  font-size: 31px;
+  font-weight: 800;
+}
+
+.simple-heading span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.simple-heading > button {
+  min-height: 40px;
+  padding: 0 14px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--ink);
+  background: var(--pop-yellow);
+  border: 2px solid var(--ink);
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 800;
+  box-shadow: 4px 4px 0 var(--ink);
+}
+
+.processing-card {
+  position: relative;
+  padding: 15px;
+  display: grid;
+  grid-template-columns: 180px 1fr auto;
+  gap: 20px;
+  align-items: center;
+  background: var(--panel);
+  border: 2px solid var(--ink);
+  border-radius: 8px;
+  box-shadow: 5px 5px 0 var(--ink);
+}
+
+.processing-cover {
+  height: 108px;
+  border: 2px solid var(--ink);
+  border-radius: 7px;
+  background-size: cover;
+  background-position: center;
+}
+
+.processing-cover span {
+  display: inline-block;
+  margin: 9px;
+  padding: 5px 7px;
+  border: 2px solid var(--ink);
+  border-radius: 6px;
+  color: #fff;
+  background: var(--pop-red);
+  font-size: 8px;
+  font-weight: 800;
+}
+
+.processing-info > span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--pop-blue);
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.processing-info h3 {
+  margin: 7px 0 4px;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.processing-info p {
+  color: var(--muted);
+  margin-bottom: 12px;
+  font-size: 10px;
+}
+
+.task-progress {
+  max-width: 500px;
+  height: 8px;
+  background: #fff;
+  border: 2px solid var(--ink);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.task-progress i {
+  display: block;
+  height: 100%;
+  background: var(--pop-yellow);
+}
+
+.processing-info small {
+  display: block;
+  color: var(--muted);
+  margin-top: 6px;
+  font-size: 8px;
+  font-weight: 800;
+}
+
+.more {
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font-weight: 800;
+}
+
+.upload-guide,
+.simple-placeholder {
+  margin-top: 20px;
+  padding: 65px 20px;
+  text-align: center;
+  background: var(--panel);
+  border: 2px dashed var(--ink);
+  border-radius: 8px;
+  box-shadow: 5px 5px 0 rgba(23, 23, 23, .14);
+}
+
+.upload-guide .modal-icon,
+.simple-placeholder .modal-icon {
+  margin-bottom: 15px;
+}
+
+.upload-guide h2,
+.simple-placeholder h2 {
+  font-size: 17px;
+  margin-bottom: 7px;
+  font-weight: 800;
+}
+
+.upload-guide p,
+.simple-placeholder p {
+  color: var(--muted);
+  font-size: 10px;
+}
