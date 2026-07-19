@@ -90,6 +90,7 @@ export const ApiErrorSchema = z.object({
 export type SubtitleCue = z.infer<typeof SubtitleCueSchema>
 export type VideoSummary = z.infer<typeof VideoSummarySchema>
 export type LessonDetail = z.infer<typeof LessonDetailSchema>
+export type AuthSession = z.infer<typeof AuthSessionSchema>
 export type ProcessingJob = z.infer<typeof ProcessingJobSchema>
 export type VideoQuery = z.infer<typeof VideoQuerySchema>
 export type ProgressUpdate = z.infer<typeof ProgressUpdateSchema>

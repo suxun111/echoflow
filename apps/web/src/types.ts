@@ -7,6 +7,18 @@ export type Cue = {
 
 export type AppView = 'home' | 'discover' | 'favorites' | 'history' | 'vocabulary' | 'uploads' | 'settings'
 
+export type AuthUser = {
+  id: string
+  phone: string
+  displayName: string
+}
+
+export type AuthSession = {
+  accessToken: string
+  refreshToken: string
+  user: AuthUser
+}
+
 export type Course = {
   id: string
   title: string

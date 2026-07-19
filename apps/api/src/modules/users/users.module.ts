@@ -1,9 +1,16 @@
-import { Controller, Get, Module } from '@nestjs/common'
+import { Controller, Get, Headers, Inject, Module } from '@nestjs/common'
+import { AuthModule, DevAuthService } from '../auth/auth.module'
 
 @Controller('users')
 export class UsersController {
-  @Get('me') me() { return { id: 'demo-user', phone: '138****0000', displayName: 'Lena', streakDays: 7, dailyGoalMinutes: 30 } }
+  constructor(@Inject(DevAuthService) private readonly auth: DevAuthService) {}
+
+  @Get('me')
+  me(@Headers('authorization') authorization?: string) {
+    const user = this.auth.userFromAuthorization(authorization)
+    return { ...user, streakDays: 7, dailyGoalMinutes: 30 }
+  }
 }
 
-@Module({ controllers: [UsersController] })
+@Module({ imports: [AuthModule], controllers: [UsersController] })
 export class UsersModule {}
