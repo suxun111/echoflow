@@ -40,13 +40,21 @@ flowchart LR
 
 ## 异步处理
 
-`apps/worker` 通过 BullMQ 消费 `online-learning-media` 队列。当前实现为幂等的媒体处理骨架，可模拟 `transcode`、`transcribe`、`translate`、`segment`、`publish` 阶段。
+`apps/worker` 通过 BullMQ 消费 `online-learning-media` 队列，使用 `uploadId + type` 数据库唯一键和 BullMQ `jobId` 做幂等约束；每个阶段会更新 PostgreSQL 状态，失败由 BullMQ 重试并记录错误。
 
 ## 数据与存储
 
 `packages/database` 定义 PostgreSQL Prisma schema，覆盖用户、视频资产、课程、字幕、进度、收藏、生词、录音、上传和处理任务。
 
-`packages/storage` 提供 `StorageProvider` 接口，当前有内存实现和 MinIO 实现。上传目标包含 `objectKey`、`uploadUrl` 和 `expiresAt`。
+`packages/storage` 提供 `StorageProvider` 接口，测试环境使用内存实现，开发/生产使用 MinIO 实现。上传目标包含 `objectKey`、`uploadUrl` 和 `expiresAt`，文件名会经过安全清洗。
+
+## 生产基础版
+
+- API 通过 Prisma Repository 访问用户、验证码、学习进度、上传记录和处理任务。
+- 私有 API 使用 HS256 JWT；管理接口要求 `admin` 或 `editor` 角色。
+- Redis 用于 BullMQ 和限流；PostgreSQL 迁移位于 `packages/database/prisma/migrations`。
+- API 提供 request ID、统一错误结构、JSON 结构化日志以及 liveness/readiness 检查。
+- `.env.example` 定义开发配置；生产配置禁止使用默认 JWT Secret 或缺失关键依赖地址。
 
 ## 验证状态
 

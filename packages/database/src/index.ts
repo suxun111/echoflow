@@ -1,3 +1,5 @@
+import { PrismaClient } from '@prisma/client'
+
 export const databasePackage = {
   provider: 'postgresql',
   schemaPath: 'packages/database/prisma/schema.prisma',
@@ -5,6 +7,12 @@ export const databasePackage = {
 
 export type DatabaseRecordId = string
 export type DatabaseReadiness = { configured: boolean; provider: 'postgresql'; message: string }
+
+export class DatabaseService extends PrismaClient {
+  async onModuleDestroy() {
+    await this.$disconnect()
+  }
+}
 
 export function getDatabaseReadiness(databaseUrl = process.env.DATABASE_URL): DatabaseReadiness {
   return databaseUrl

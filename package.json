@@ -10,6 +10,7 @@
     "lint": "pnpm -r --if-present lint",
     "db:generate": "pnpm --filter @online-learning/database generate",
     "db:migrate": "pnpm --filter @online-learning/database migrate",
+    "db:migrate:deploy": "pnpm --filter @online-learning/database migrate:deploy",
     "db:seed": "pnpm --filter @online-learning/database seed",
     "infra:up": "docker compose -f infrastructure/docker-compose.yml up -d",
     "infra:down": "docker compose -f infrastructure/docker-compose.yml down"

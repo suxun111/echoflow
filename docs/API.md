@@ -20,7 +20,7 @@ API 默认前缀为 `/api`，开发端口为 `3001`。请求与响应的核心�
 { "phone": "13800000000" }
 ```
 
-开发环境返回固定验证码 `246810`。`NODE_ENV=production` 时开发短信服务会拒绝请求。
+测试环境返回固定验证码 `246810`；开发环境生成一次性验证码并仅在开发响应中返回。`NODE_ENV=production` 时必须接入正式短信服务，目前未配置会拒绝请求。
 
 `POST /api/auth/verify-code`
 
@@ -30,7 +30,7 @@ API 默认前缀为 `/api`，开发端口为 `3001`。请求与响应的核心�
 { "phone": "13800000000", "code": "246810" }
 ```
 
-返回开发访问令牌、刷新令牌和用户信息。
+返回 JWT 访问令牌、刷新令牌和用户信息。访问令牌通过 `Authorization: Bearer <accessToken>` 使用。
 
 `POST /api/auth/refresh`
 
@@ -73,9 +73,13 @@ API 默认前缀为 `/api`，开发端口为 `3001`。请求与响应的核心�
 
 `GET /api/progress/:lessonId`
 
+需要登录；进度按用户和课程保存到 PostgreSQL。
+
 返回课程学习进度，未找到时返回空进度。
 
 `PUT /api/progress/:lessonId`
+
+需要登录。
 
 请求体：
 
@@ -102,15 +106,24 @@ API 默认前缀为 `/api`，开发端口为 `3001`。请求与响应的核心�
 }
 ```
 
-返回私有上传目标和首个处理任务。
+需要登录。返回 MinIO/S3 私有上传目标和首个处理任务；文件名、MIME、大小和权限确认会在服务端校验。
+
+客户端完成对象上传后调用 `POST /api/uploads/:uploadId/complete`。API 会确认私有对象存在、记录完成时间，再将首个 BullMQ 任务投递到队列。
 
 `GET /api/jobs`
 
-返回当前内存任务列表。
+需要登录，返回 PostgreSQL 中最近任务列表。
 
 `GET /api/jobs/:id`
 
-返回单个任务；不存在时返回 404。
+需要登录，返回单个持久化任务；不存在时返回 404。
+
+## 健康检查
+
+- `GET /api/health/live`：进程存活检查，不访问外部依赖。
+- `GET /api/health/ready`：PostgreSQL 和 Redis readiness 检查；依赖不可用时返回 503。
+
+除测试环境外，API 不使用内存 Map 保存业务状态。
 
 ## 管理端
 

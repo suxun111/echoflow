@@ -59,8 +59,8 @@ export const ProgressUpdateSchema = z.object({
 })
 
 export const UploadRequestSchema = z.object({
-  fileName: z.string().min(1),
-  contentType: z.string().startsWith('video/'),
+  fileName: z.string().min(1).max(255).refine((value) => !(/[\\/\0]/.test(value)), '文件名不能包含路径或控制字符'),
+  contentType: z.enum(['video/mp4', 'video/webm', 'video/quicktime', 'video/x-matroska']),
   sizeBytes: z.number().int().positive().max(2 * 1024 * 1024 * 1024),
   rightsConfirmed: z.literal(true),
 })

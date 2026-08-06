@@ -178,9 +178,12 @@ model Upload {
   userId          String
   videoAssetId    String?
   originalName    String
+  contentType     String
+  sizeBytes       Int
   storageKey      String
   rightsConfirmed Boolean
   private         Boolean         @default(true)
+  completedAt     DateTime?
   createdAt       DateTime        @default(now())
   user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   videoAsset      VideoAsset?      @relation(fields: [videoAssetId], references: [id])
@@ -199,4 +202,18 @@ model ProcessingJob {
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
   upload    Upload    @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+  @@unique([uploadId, type])
+  @@index([status, updatedAt])
+}
+
+model VerificationCode {
+  id         String    @id @default(cuid())
+  phone      String
+  codeHash   String
+  expiresAt  DateTime
+  consumedAt DateTime?
+  attempts   Int       @default(0)
+  createdAt  DateTime  @default(now())
+  @@index([phone, createdAt])
+  @@index([expiresAt])
 }

@@ -9,6 +9,7 @@ import { ProgressModule } from './modules/progress/progress.module'
 import { UploadsModule } from './modules/uploads/uploads.module'
 import { JobsModule } from './modules/jobs/jobs.module'
 import { AdminModule } from './modules/admin/admin.module'
+import { DatabaseModule } from './database.module'
 
-@Module({ imports: [HealthModule, AuthModule, UsersModule, VideosModule, LessonsModule, SubtitlesModule, ProgressModule, UploadsModule, JobsModule, AdminModule] })
+@Module({ imports: [DatabaseModule, HealthModule, AuthModule, UsersModule, VideosModule, LessonsModule, SubtitlesModule, ProgressModule, UploadsModule, JobsModule, AdminModule] })
 export class AppModule {}

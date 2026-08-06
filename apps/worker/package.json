@@ -12,6 +12,7 @@
   "dependencies": {
     "@online-learning/config": "workspace:*",
     "@online-learning/contracts": "workspace:*",
+    "@online-learning/database": "workspace:*",
     "bullmq": "^5.56.2",
     "ioredis": "^5.6.1"
   },
