@@ -1,0 +1,243 @@
+.player-tools {
+  grid-template-columns: minmax(76px, 1.15fr) repeat(7, 1fr);
+}
+
+.speed-control {
+  min-width: 76px;
+  min-height: 44px;
+  padding: 4px 5px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  color: #777283;
+  border-radius: 8px;
+}
+
+.speed-control:hover,
+.speed-control:focus-within {
+  color: var(--purple);
+  background: #f4f1fe;
+}
+
+.speed-label {
+  font-size: 8px;
+  line-height: 1;
+}
+
+.speed-control select {
+  width: 68px;
+  height: 28px;
+  padding: 0 7px;
+  color: #514a66;
+  background: #fff;
+  border: 1px solid #dcd7ea;
+  border-radius: 7px;
+  font-size: 11px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.speed-control select:focus-visible {
+  outline: 2px solid #aa99ee;
+  outline-offset: 2px;
+}
+
+.synced-word {
+  display: inline;
+  border-radius: 5px;
+  transition: color .16s ease, background-color .16s ease, box-shadow .16s ease;
+}
+
+.synced-word.is-current {
+  color: #5534ba;
+  background: #e8e1ff;
+  box-shadow: 0 3px 0 #9f8ae9;
+}
+
+.caption-word {
+  border-radius: 4px;
+  transition: color .12s ease, background-color .12s ease, box-shadow .12s ease;
+}
+
+.caption-word.is-current {
+  color: #fff;
+  background: #8062e7;
+  box-shadow: 0 2px 0 #4e379d;
+}
+
+.native-track i {
+  transition: width .12s linear, box-shadow .12s ease;
+}
+
+.native-track.is-playing i {
+  box-shadow: 0 0 8px #b8a8ff;
+}
+
+.cue-time {
+  margin-top: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #aaa5b8;
+  font-size: 11px;
+  font-style: normal;
+  line-height: 1.2;
+}
+
+.cue-time svg {
+  flex: 0 0 auto;
+}
+
+.vocab-word-list li {
+  padding: 12px 13px;
+  display: grid;
+  grid-template-columns: minmax(70px, .62fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  border: 1px solid #e7e2f2;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #fff, #fbfaff);
+}
+
+.vocab-word-label {
+  min-width: 0;
+  padding-right: 12px;
+  border-right: 1px solid #eeeaf5;
+}
+
+.vocab-word-label strong,
+.vocab-word-label small {
+  display: block;
+}
+
+.vocab-word-label strong {
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.25;
+}
+
+.vocab-word-label small {
+  margin-top: 5px;
+  color: #aaa5b8;
+  font-size: 9px;
+}
+
+.vocab-word-meaning span {
+  display: block;
+  margin: 0;
+  color: #5b5570;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.45;
+}
+
+.vocab-phrase-section {
+  margin-top: 6px;
+  padding-top: 17px;
+  border-top-color: #e8e4f1;
+}
+
+.vocab-phrase-section > p {
+  margin: 0;
+  color: #817b92;
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: .01em;
+}
+
+.vocab-phrase-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.vocab-phrase-item {
+  width: 100%;
+  min-height: 62px;
+  padding: 10px 11px 10px 13px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  color: var(--ink);
+  background: linear-gradient(135deg, #fff, #faf8ff);
+  border: 1px solid #e4deef;
+  border-radius: 11px;
+  box-shadow: 0 2px 0 #eeeaf6;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color .16s ease, background-color .16s ease, box-shadow .16s ease, transform .16s ease;
+}
+
+.vocab-phrase-item:hover {
+  border-color: #c9bbed;
+  background: #f9f7ff;
+  box-shadow: 0 6px 14px #3d2a760d;
+  transform: translateY(-1px);
+}
+
+.vocab-phrase-item:focus-visible {
+  outline: 2px solid #9e89e7;
+  outline-offset: 2px;
+}
+
+.vocab-phrase-copy {
+  min-width: 0;
+}
+
+.vocab-phrase-copy strong,
+.vocab-phrase-copy small {
+  display: block;
+}
+
+.vocab-phrase-copy strong {
+  overflow-wrap: anywhere;
+  color: #27223a;
+  font-size: 13px;
+  line-height: 1.3;
+}
+
+.vocab-phrase-copy small {
+  margin-top: 4px;
+  color: #80798e;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.vocab-phrase-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #8470cc;
+}
+
+.vocab-phrase-meta em {
+  min-width: 28px;
+  padding: 3px 5px;
+  color: #694fc3;
+  background: #eee9ff;
+  border-radius: 5px;
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 700;
+  line-height: 1.1;
+  text-align: center;
+}
+
+@media (max-width: 760px) {
+  .player-tools {
+    grid-template-columns: repeat(4, minmax(76px, 1fr));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .synced-word,
+  .caption-word,
+  .native-track i,
+  .vocab-phrase-item {
+    transition: none;
+  }
+}
