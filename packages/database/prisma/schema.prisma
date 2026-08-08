@@ -41,6 +41,7 @@ enum JobType {
 enum JobStatus {
   QUEUED
   PROCESSING
+  WAITING_DEPENDENCY
   REVIEW
   COMPLETED
   FAILED
@@ -196,8 +197,12 @@ model ProcessingJob {
   type      JobType
   status    JobStatus @default(QUEUED)
   progress  Int       @default(0)
+  stage     String?
   attempts  Int       @default(0)
   error     String?
+  errorCode String?
+  lastAttemptAt DateTime?
+  failedAt DateTime?
   payload   Json
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt

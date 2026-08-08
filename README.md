@@ -45,6 +45,8 @@ pnpm --filter @online-learning/worker dev
 生产基础配置：
 
 - 复制 `.env.example` 为 `.env`；生产环境必须显式设置 `DATABASE_URL`、`REDIS_URL`、非默认 `JWT_SECRET` 和 MinIO 凭据。
+- 生产环境必须显式设置 `MOSS_BASE_URL`；容器编排中应使用 MOSS 服务名（例如 `http://moss:8001`），不要依赖容器内的 `127.0.0.1`。
+- 当前机器上若 MOSS 以独立 Docker Compose 栈运行，Docker Desktop 中的 EchoFlow Worker 应配置 `MOSS_BASE_URL=http://host.docker.internal:8001`；在宿主机直接运行 Worker 时使用 `http://127.0.0.1:8001`。
 - API readiness 检查：`GET /api/health/ready`；liveness 检查：`GET /api/health/live`。
 - `pnpm infra:up` 仅适合本地开发；生产环境应使用托管 PostgreSQL/Redis/S3 或等价容器编排，并在发布前执行迁移。
 - 单机容器化可使用 `docker compose -f docker-compose.production.yml up -d --build`，首次启动后执行 `docker compose -f docker-compose.production.yml run --rm api pnpm db:migrate:deploy` 和 `pnpm db:seed`。

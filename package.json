@@ -4,7 +4,7 @@
   "version": "0.2.0",
   "packageManager": "pnpm@11.9.0",
   "scripts": {
-    "dev": "pnpm --parallel --filter './apps/*' dev",
+    "dev": "pnpm build && pnpm --parallel --filter './apps/*' dev",
     "build": "pnpm -r --if-present build",
     "test": "pnpm -r --if-present test",
     "lint": "pnpm -r --if-present lint",

@@ -1,7 +1,7 @@
 import { z } from 'zod'
 
 export const IdSchema = z.string().min(1)
-export const JobStatusSchema = z.enum(['queued', 'processing', 'review', 'completed', 'failed'])
+export const JobStatusSchema = z.enum(['queued', 'processing', 'waiting_dependency', 'review', 'completed', 'failed'])
 export const JobTypeSchema = z.enum(['transcode', 'transcribe', 'translate', 'segment', 'publish'])
 export const LessonLevelSchema = z.enum(['A1', 'A2', 'B1', 'B2', 'C1'])
 
@@ -71,7 +71,13 @@ export const ProcessingJobSchema = z.object({
   type: JobTypeSchema,
   status: JobStatusSchema,
   progress: z.number().min(0).max(100),
+  stage: z.string().nullable().optional(),
   error: z.string().nullable(),
+  errorCode: z.string().nullable().optional(),
+  attempts: z.number().int().nonnegative().optional(),
+  lastAttemptAt: z.string().datetime().nullable().optional(),
+  failedAt: z.string().datetime().nullable().optional(),
+  payload: z.record(z.string(), z.unknown()).optional(),
   updatedAt: z.string().datetime(),
 })
 

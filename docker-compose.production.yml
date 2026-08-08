@@ -62,6 +62,7 @@ services:
       MINIO_ENDPOINT: minio
       MINIO_PORT: 9000
       MINIO_USE_SSL: "false"
+      MOSS_BASE_URL: ${MOSS_BASE_URL:?set MOSS_BASE_URL}
     depends_on:
       postgres:
         condition: service_healthy
@@ -86,6 +87,10 @@ services:
     environment:
       DATABASE_URL: postgresql://online_learning:${POSTGRES_PASSWORD}@postgres:5432/online_learning
       REDIS_URL: redis://redis:6379
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: 9000
+      MINIO_USE_SSL: "false"
+      MOSS_BASE_URL: ${MOSS_BASE_URL:?set MOSS_BASE_URL}
     depends_on:
       postgres:
         condition: service_healthy

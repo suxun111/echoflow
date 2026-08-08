@@ -12,4 +12,11 @@ describe('Prisma domain schema', () => {
   it('targets PostgreSQL', () => expect(schema).toContain('provider = "postgresql"'))
   it('enforces one processing job per upload stage', () => expect(schema).toContain('@@unique([uploadId, type])'))
   it('tracks upload completion before queueing work', () => expect(schema).toContain('completedAt     DateTime?'))
+  it('tracks dependency failures without losing progress', () => {
+    expect(schema).toContain('WAITING_DEPENDENCY')
+    expect(schema).toContain('stage     String?')
+    expect(schema).toContain('errorCode String?')
+    expect(schema).toContain('lastAttemptAt DateTime?')
+    expect(schema).toContain('failedAt DateTime?')
+  })
 })

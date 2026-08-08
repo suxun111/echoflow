@@ -118,10 +118,14 @@ API 默认前缀为 `/api`，开发端口为 `3001`。请求与响应的核心�
 
 需要登录，返回单个持久化任务；不存在时返回 404。
 
+`POST /api/jobs/:id/retry`
+
+仅允许任务所属用户重试 `failed` 任务。重试复用已有上传对象和任务记录，不会重新上传文件。
+
 ## 健康检查
 
 - `GET /api/health/live`：进程存活检查，不访问外部依赖。
-- `GET /api/health/ready`：PostgreSQL 和 Redis readiness 检查；依赖不可用时返回 503。
+- `GET /api/health/ready`：PostgreSQL、Redis 和 MOSS readiness 检查；依赖不可用时返回 503，并在 `checks` 中区分具体依赖。
 
 除测试环境外，API 不使用内存 Map 保存业务状态。
 

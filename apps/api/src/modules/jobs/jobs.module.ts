@@ -1,4 +1,4 @@
-import { Controller, Get, Inject, Injectable, Module, NotFoundException, OnModuleDestroy, Param, UseGuards } from '@nestjs/common'
+import { BadRequestException, Controller, Get, Inject, Injectable, Module, NotFoundException, OnModuleDestroy, Param, Post, UseGuards } from '@nestjs/common'
 import { Queue } from 'bullmq'
 import type { ProcessingJob } from '@online-learning/contracts'
 import { DatabaseService } from '@online-learning/database'
@@ -8,10 +8,11 @@ import { AuthGuard, CurrentUser, type AuthenticatedUser } from '../auth/auth.mod
 export const MEDIA_QUEUE = 'MEDIA_QUEUE'
 
 const jobTypes = { transcode: 'TRANSCODE', transcribe: 'TRANSCRIBE', translate: 'TRANSLATE', segment: 'SEGMENT', publish: 'PUBLISH' } as const
-const jobStatuses = { QUEUED: 'queued', PROCESSING: 'processing', REVIEW: 'review', COMPLETED: 'completed', FAILED: 'failed' } as const
+const jobStatuses = { QUEUED: 'queued', PROCESSING: 'processing', WAITING_DEPENDENCY: 'waiting_dependency', REVIEW: 'review', COMPLETED: 'completed', FAILED: 'failed' } as const
 
-function toContract(job: { id: string; uploadId: string; type: keyof typeof jobTypes | string; status: keyof typeof jobStatuses | string; progress: number; error: string | null; updatedAt: Date }): ProcessingJob {
-  return { id: job.id, uploadId: job.uploadId, type: job.type.toLowerCase() as ProcessingJob['type'], status: jobStatuses[job.status as keyof typeof jobStatuses] ?? job.status.toLowerCase() as ProcessingJob['status'], progress: job.progress, error: job.error, updatedAt: job.updatedAt.toISOString() }
+function toContract(job: { id: string; uploadId: string; type: keyof typeof jobTypes | string; status: keyof typeof jobStatuses | string; progress: number; stage?: string | null; error: string | null; errorCode?: string | null; attempts?: number; lastAttemptAt?: Date | null; failedAt?: Date | null; payload?: unknown; updatedAt: Date }): ProcessingJob {
+  const payload = typeof job.payload === 'object' && job.payload !== null && !Array.isArray(job.payload) ? job.payload as Record<string, unknown> : undefined
+  return { id: job.id, uploadId: job.uploadId, type: job.type.toLowerCase() as ProcessingJob['type'], status: jobStatuses[job.status as keyof typeof jobStatuses] ?? job.status.toLowerCase() as ProcessingJob['status'], progress: job.progress, stage: job.stage ?? null, error: job.error, errorCode: job.errorCode ?? null, attempts: job.attempts, lastAttemptAt: job.lastAttemptAt?.toISOString() ?? null, failedAt: job.failedAt?.toISOString() ?? null, payload, updatedAt: job.updatedAt.toISOString() }
 }
 
 @Injectable()
@@ -42,8 +43,36 @@ export class JobsService implements OnModuleDestroy {
 
   async enqueue(job: ProcessingJob) {
     if (!this.queue) return job
+    const existing = await this.queue.getJob(job.id)
+    if (existing) {
+      const state = await existing.getState()
+      if (state === 'waiting' || state === 'active' || state === 'delayed') return job
+      await existing.remove()
+    }
     await this.queue.add(job.type, job, { jobId: job.id, attempts: 3, backoff: { type: 'exponential', delay: 5_000 }, removeOnComplete: 1000, removeOnFail: 5000 })
     return job
+  }
+
+  async retry(id: string, userId: string) {
+    if (process.env.NODE_ENV === 'test') {
+      const job = this.testJobs.get(id)
+      if (!job) throw new NotFoundException('任务不存在')
+      if (job.status !== 'failed') throw new BadRequestException('只有失败任务可以重试')
+      const retried: ProcessingJob = { ...job, status: 'queued', stage: 'retry_requested', error: null, errorCode: null, failedAt: null, updatedAt: new Date().toISOString() }
+      this.testJobs.set(id, retried)
+      return retried
+    }
+
+    const existing = await this.database.processingJob.findUnique({ where: { id }, include: { upload: { select: { userId: true } } } })
+    if (!existing || existing.upload.userId !== userId) throw new NotFoundException('任务不存在')
+    if (existing.status !== 'FAILED') throw new BadRequestException('只有失败任务可以重试')
+    const updated = await this.database.processingJob.updateMany({ where: { id, status: 'FAILED', upload: { userId } }, data: { status: 'QUEUED', stage: 'retry_requested', error: null, errorCode: null, failedAt: null } })
+    if (!updated.count) throw new BadRequestException('任务状态已发生变化，请刷新后重试')
+    const retried = await this.database.processingJob.findUnique({ where: { id } })
+    if (!retried) throw new NotFoundException('任务不存在')
+    const contract = toContract(retried)
+    await this.enqueue(contract)
+    return contract
   }
 
   async getByUpload(uploadId: string) {
@@ -85,6 +114,7 @@ export class JobsController {
   constructor(@Inject(JobsService) private readonly jobs: JobsService) {}
   @Get() list(@CurrentUser() user: AuthenticatedUser) { return this.jobs.list(user.id) }
   @Get(':id') get(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) { return this.jobs.get(id, user.id) }
+  @Post(':id/retry') retry(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) { return this.jobs.retry(id, user.id) }
 }
 
 @Module({ controllers: [JobsController], providers: [JobsService, mediaQueueProvider], exports: [JobsService] })

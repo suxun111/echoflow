@@ -170,6 +170,9 @@ importers:
       ioredis:
         specifier: ^5.6.1
         version: 5.11.1
+      minio:
+        specifier: ^8.0.5
+        version: 8.0.7
     devDependencies:
       '@types/node':
         specifier: ^22.15.32

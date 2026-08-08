@@ -14,7 +14,8 @@
     "@online-learning/contracts": "workspace:*",
     "@online-learning/database": "workspace:*",
     "bullmq": "^5.56.2",
-    "ioredis": "^5.6.1"
+    "ioredis": "^5.6.1",
+    "minio": "^8.0.5"
   },
   "devDependencies": { "@types/node": "^22.15.32", "tsx": "^4.20.3", "typescript": "^5.8.3", "vitest": "^3.2.4" }
 }

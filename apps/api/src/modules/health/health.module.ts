@@ -8,7 +8,7 @@ export class HealthService {
   constructor(private readonly database: DatabaseService) {}
 
   async readiness() {
-    if (process.env.NODE_ENV === 'test') return { status: 'ok', checks: { database: 'skipped-test', redis: 'skipped-test' } }
+    if (process.env.NODE_ENV === 'test') return { status: 'ok', checks: { database: 'skipped-test', redis: 'skipped-test', moss: 'skipped-test' } }
     const checks: Record<string, string> = {}
     try {
       await this.database.$queryRaw`SELECT 1`
@@ -25,6 +25,17 @@ export class HealthService {
       checks.redis = 'failed'
     } finally {
       redis.disconnect()
+    }
+    const env = loadServerEnv()
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), env.MOSS_REQUEST_TIMEOUT_MS)
+    try {
+      const response = await fetch(`${env.MOSS_BASE_URL.replace(/\/$/, '')}/api/runtime`, { signal: controller.signal })
+      checks.moss = response.ok ? 'ok' : 'failed'
+    } catch {
+      checks.moss = 'failed'
+    } finally {
+      clearTimeout(timer)
     }
     const status = Object.values(checks).every((value) => value === 'ok') ? 'ok' : 'failed'
     return { status, checks }
