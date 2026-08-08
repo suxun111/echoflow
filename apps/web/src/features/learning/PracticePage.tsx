@@ -47,10 +47,22 @@ type WordMenu = ActiveWord & {
 type InteractiveSentenceProps = {
   text: string
   cue: LearningCue
+  activeWordIndex?: number | null
   onOpen: (element: HTMLElement, word: string, cue: LearningCue) => void
   onScheduleClose: () => void
   onContextMenu: (event: MouseEvent<HTMLSpanElement>, word: string, cue: LearningCue) => void
   onLongPress: (element: HTMLElement, word: string, cue: LearningCue) => void
+}
+
+function getSentenceWords(text: string) {
+  const words: Array<{ value: string; start: number }> = []
+  const pattern = /\S+/g
+  let match = pattern.exec(text)
+  while (match) {
+    words.push({ value: match[0], start: match.index })
+    match = pattern.exec(text)
+  }
+  return words
 }
 
 function formatCueTime(value: number) {
@@ -64,6 +76,7 @@ function cueTimestamp(cue: LearningCue) {
 function InteractiveSentence({
   text,
   cue,
+  activeWordIndex = null,
   onOpen,
   onScheduleClose,
   onContextMenu,
@@ -71,6 +84,7 @@ function InteractiveSentence({
 }: InteractiveSentenceProps) {
   const longPressTimer = useRef<number | null>(null)
   const longPressHandled = useRef(false)
+  let wordIndex = 0
 
   const clearLongPress = () => {
     if (longPressTimer.current !== null) {
@@ -102,9 +116,21 @@ function InteractiveSentence({
     onOpen(event.currentTarget, word, cue)
   }
 
+  const renderSegment = (value: string, keyPrefix: string) => value.split(/(\s+)/).map((part, partIndex) => {
+    if (!part || /^\s+$/.test(part) || !/[A-Za-z0-9]/.test(part)) return part
+    const currentWordIndex = wordIndex
+    wordIndex += 1
+    return <span
+      key={keyPrefix + '-word-' + partIndex}
+      className={'synced-word' + (currentWordIndex === activeWordIndex ? ' is-current' : '')}
+    >
+      {part}
+    </span>
+  })
+
   return <>
     {segmentCueText(text, cue.highlight).map((segment, index) => {
-      if (!segment.entry) return segment.value
+      if (!segment.entry) return <span key={'plain-' + index}>{renderSegment(segment.value, 'plain-' + index)}</span>
 
       const normalizedWord = normalizeVocabularyTerm(segment.value)
       return (
@@ -148,9 +174,27 @@ function InteractiveSentence({
           onTouchEnd={clearLongPress}
           onTouchCancel={clearLongPress}
         >
-          {segment.value}
+          {renderSegment(segment.value, 'entry-' + segment.entry.id + '-' + index)}
         </span>
       )
+    })}
+  </>
+}
+
+function PlayerCaption({ text, activeWordIndex = null }: { text: string; activeWordIndex?: number | null }) {
+  let wordIndex = 0
+
+  return <>
+    {text.split(/(\s+)/).map((part, partIndex) => {
+      if (!part || /^\s+$/.test(part)) return part
+      const currentWordIndex = wordIndex
+      wordIndex += 1
+      return <span
+        key={'caption-word-' + partIndex}
+        className={'caption-word' + (currentWordIndex === activeWordIndex ? ' is-current' : '')}
+      >
+        {part}
+      </span>
     })}
   </>
 }
@@ -167,8 +211,19 @@ export function PracticePage({ video, onBack, favorite, onFavorite }: PracticePa
   const [activeWord, setActiveWord] = useState<ActiveWord | null>(null)
   const [wordMenu, setWordMenu] = useState<WordMenu | null>(null)
   const [vocabularyNotice, setVocabularyNotice] = useState<string | null>(null)
+  const [activeWordIndex, setActiveWordIndex] = useState<number | null>(null)
+  const [sentenceProgress, setSentenceProgress] = useState(0)
   const closeTimer = useRef<number | null>(null)
   const noticeTimer = useRef<number | null>(null)
+  const activeWordRef = useRef<number | null>(null)
+  const speechRef = useRef<{
+    utterance: SpeechSynthesisUtterance | null
+    fallbackTimer: number | null
+    isPaused: boolean
+    pausedAt: number | null
+    pausedDuration: number
+    hasBoundaryEvents: boolean
+  }>({ utterance: null, fallbackTimer: null, isPaused: false, pausedAt: null, pausedDuration: 0, hasBoundaryEvents: false })
   const cue = learningCues[current]
   const phraseVocabulary = useMemo(
     () => getVocabularyEntriesForHighlights(cue.highlight).filter((entry) => entry.word.includes(' ')),
@@ -179,6 +234,9 @@ export function PracticePage({ video, onBack, favorite, onFavorite }: PracticePa
   const chineseSelfCheck = tab === '中文'
   const showDictation = dictation && !chineseSelfCheck && tab !== '单词'
   const playerCaption = showEnglish ? cue.english : chineseSelfCheck ? cue.chinese : null
+  const timelineEnd = learningCues[learningCues.length - 1]?.end ?? cue.end
+  const playerTime = cue.start + (cue.end - cue.start) * sentenceProgress
+  const playerTrackWidth = Math.min(100, playerTime / timelineEnd * 100)
 
   const clearCloseTimer = useCallback(() => {
     if (closeTimer.current !== null) {
@@ -266,9 +324,136 @@ export function PracticePage({ video, onBack, favorite, onFavorite }: PracticePa
   const recorder = useRecorder(handleRecordingComplete)
   const go = (index: number) => setCurrent(Math.min(Math.max(index, 0), learningCues.length - 1))
 
+  const clearSpeechTimer = useCallback(() => {
+    if (speechRef.current.fallbackTimer !== null) {
+      window.clearInterval(speechRef.current.fallbackTimer)
+      speechRef.current.fallbackTimer = null
+    }
+  }, [])
+
+  const updateActiveWord = useCallback((index: number | null, source: SpeechSynthesisUtterance | null = null) => {
+    if (source && (speechRef.current.utterance !== source || speechRef.current.isPaused)) return
+    setActiveWordIndex((current) => {
+      if (source && (speechRef.current.utterance !== source || speechRef.current.isPaused)) return current
+      activeWordRef.current = index
+      return index
+    })
+  }, [])
+
+  const updateSentenceProgress = useCallback((progress: number, source: SpeechSynthesisUtterance | null = null) => {
+    if (source && (speechRef.current.utterance !== source || speechRef.current.isPaused)) return
+    setSentenceProgress((current) => {
+      if (source && (speechRef.current.utterance !== source || speechRef.current.isPaused)) return current
+      return Math.min(1, Math.max(0, progress))
+    })
+  }, [])
+
+  const stopSpeech = useCallback(() => {
+    clearSpeechTimer()
+    speechRef.current.utterance = null
+    speechRef.current.isPaused = false
+    speechRef.current.pausedAt = null
+    speechRef.current.pausedDuration = 0
+    speechRef.current.hasBoundaryEvents = false
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.cancel()
+    }
+    setPlaying(false)
+    updateActiveWord(null)
+    updateSentenceProgress(0)
+  }, [clearSpeechTimer, updateActiveWord, updateSentenceProgress])
+
+  const toggleSpeechPlayback = useCallback(() => {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window) || typeof SpeechSynthesisUtterance === 'undefined') {
+      setVocabularyNotice('当前浏览器不支持句子朗读')
+      return
+    }
+
+    const synthesis = window.speechSynthesis
+    if (speechRef.current.utterance) {
+      if (speechRef.current.isPaused) {
+        if (speechRef.current.pausedAt !== null) {
+          speechRef.current.pausedDuration += Date.now() - speechRef.current.pausedAt
+          speechRef.current.pausedAt = null
+        }
+        synthesis.resume()
+        speechRef.current.isPaused = false
+        setPlaying(true)
+      } else {
+        synthesis.pause()
+        speechRef.current.isPaused = true
+        speechRef.current.pausedAt = Date.now()
+        updateActiveWord(null)
+        setPlaying(false)
+      }
+      return
+    }
+
+    clearSpeechTimer()
+    synthesis.cancel()
+    const words = getSentenceWords(cue.english)
+    const utterance = new SpeechSynthesisUtterance(cue.english)
+    utterance.lang = 'en-GB'
+    utterance.rate = speed
+    utterance.pitch = 1
+    let startedAt = 0
+    const fallbackDuration = Math.max(cue.end - cue.start, words.length * 0.28) / speed
+
+    const finish = () => {
+      if (speechRef.current.utterance !== utterance) return
+      updateSentenceProgress(1)
+      clearSpeechTimer()
+      speechRef.current.utterance = null
+      speechRef.current.isPaused = false
+      speechRef.current.pausedAt = null
+      speechRef.current.pausedDuration = 0
+      speechRef.current.hasBoundaryEvents = false
+      setPlaying(false)
+      updateActiveWord(null)
+    }
+
+    utterance.onstart = () => {
+      startedAt = Date.now()
+      speechRef.current.isPaused = false
+      speechRef.current.pausedAt = null
+      speechRef.current.pausedDuration = 0
+      speechRef.current.hasBoundaryEvents = false
+      setPlaying(true)
+      updateActiveWord(words.length > 0 ? 0 : null, utterance)
+      updateSentenceProgress(0, utterance)
+    }
+    utterance.onboundary = (event) => {
+      if (speechRef.current.utterance !== utterance || speechRef.current.isPaused) return
+      speechRef.current.hasBoundaryEvents = true
+      const boundaryIndex = words.reduce((index, word, wordIndex) => (
+        event.charIndex >= word.start ? wordIndex : index
+      ), -1)
+      if (boundaryIndex >= 0) {
+        updateActiveWord(boundaryIndex, utterance)
+        updateSentenceProgress(Math.min(.98, (boundaryIndex + .5) / Math.max(words.length, 1)), utterance)
+      }
+    }
+    utterance.onend = finish
+    utterance.onerror = finish
+    updateActiveWord(null)
+    updateSentenceProgress(0)
+    speechRef.current.utterance = utterance
+    speechRef.current.hasBoundaryEvents = false
+    speechRef.current.fallbackTimer = window.setInterval(() => {
+      if (speechRef.current.utterance !== utterance || speechRef.current.isPaused || startedAt === 0 || speechRef.current.hasBoundaryEvents) return
+      const elapsed = Date.now() - startedAt - speechRef.current.pausedDuration
+      const progress = Math.min(0.999, elapsed / 1000 / fallbackDuration)
+      updateActiveWord(words.length > 0 ? Math.floor(progress * words.length) : null, utterance)
+      updateSentenceProgress(progress, utterance)
+    }, 60)
+    synthesis.speak(utterance)
+  }, [clearSpeechTimer, cue.english, cue.end, cue.start, speed, updateActiveWord, updateSentenceProgress])
+
   useEffect(() => () => {
     if (recordingUrl) URL.revokeObjectURL(recordingUrl)
   }, [recordingUrl])
+
+  useEffect(() => () => stopSpeech(), [stopSpeech])
 
   useEffect(() => {
     const handlePointerDown = (event: globalThis.PointerEvent) => {
@@ -298,9 +483,10 @@ export function PracticePage({ video, onBack, favorite, onFavorite }: PracticePa
   }, [clearCloseTimer])
 
   useEffect(() => {
+    stopSpeech()
     setActiveWord(null)
     setWordMenu(null)
-  }, [current])
+  }, [current, stopSpeech])
 
   const openVocabularyItem = (element: HTMLElement, word: string, wordCue: LearningCue) => {
     openWord(element, word, wordCue)
@@ -325,21 +511,26 @@ export function PracticePage({ video, onBack, favorite, onFavorite }: PracticePa
           <div className="player-tint"/>
           {hiddenVideo ? <div className="listen-only"><Icon name="volume" size={36}/><strong>听力专注模式</strong><p>画面已隐藏，试着只通过声音理解内容</p></div> : <>
             {!chineseSelfCheck && <div className="video-brand">SLOW ENGLISH <span>{video.level}</span></div>}
-            <button className="center-play" onClick={() => setPlaying(!playing)}><Icon name={playing ? 'pause' : 'play'} size={34}/></button>
-            {playerCaption && <div className="video-caption">{playerCaption}</div>}
+            <button className="center-play" onClick={toggleSpeechPlayback} aria-label={playing ? '暂停句子朗读' : '播放句子朗读'}><Icon name={playing ? 'pause' : 'play'} size={34}/></button>
+            {playerCaption && <div className="video-caption"><PlayerCaption text={playerCaption} activeWordIndex={showEnglish ? activeWordIndex : null}/></div>}
           </>}
           <div className="native-controls">
-            <span>{formatCueTime(cue.start)}</span>
-            <div className="native-track"><i style={{ width: (cue.start / 36) * 100 + '%' }}/></div>
+            <span>{formatCueTime(Math.floor(playerTime))}</span>
+            <div className={'native-track' + (playing ? ' is-playing' : '')}><i style={{ width: playerTrackWidth + '%' }}/></div>
             <span>{video.duration}</span>
           </div>
         </div>
 
         <div className="player-tools">
-          <button onClick={() => setSpeed(speed === 1.5 ? .75 : speed + .25)}><strong>{speed}x</strong><span>倍速</span></button>
+          <label className="speed-control">
+            <span className="speed-label">倍速</span>
+            <select aria-label="播放倍速" value={speed} onChange={(event) => setSpeed(Number(event.target.value))}>
+              {[.75, 1, 1.25, 1.5, 2].map((option) => <option key={option} value={option}>{option}×</option>)}
+            </select>
+          </label>
           <button className={hiddenVideo ? 'active' : ''} onClick={() => setHiddenVideo(!hiddenVideo)}><Icon name="volume"/><span>隐藏视频</span></button>
           <button onClick={() => go(current - 1)} disabled={current === 0}><Icon name="chevronLeft"/><span>上一句</span></button>
-          <button className="main-control" onClick={() => setPlaying(!playing)}><Icon name={playing ? 'pause' : 'play'}/><span>{playing ? '暂停' : '播放'}</span></button>
+          <button className="main-control" onClick={toggleSpeechPlayback}><Icon name={playing ? 'pause' : 'play'}/><span>{playing ? '暂停' : '播放'}</span></button>
           <button onClick={() => go(current + 1)} disabled={current === learningCues.length - 1}><Icon name="chevronRight"/><span>下一句</span></button>
           <button className={loop ? 'active' : ''} onClick={() => setLoop(!loop)}><Icon name="repeat"/><span>单句循环</span></button>
           <button className={dictation ? 'active' : ''} onClick={() => setDictation(!dictation)}><Icon name="note"/><span>听写</span></button>
@@ -353,6 +544,7 @@ export function PracticePage({ video, onBack, favorite, onFavorite }: PracticePa
               <InteractiveSentence
                 text={cue.english}
                 cue={cue}
+                activeWordIndex={activeWordIndex}
                 onOpen={openWord}
                 onScheduleClose={scheduleWordClose}
                 onContextMenu={openWordMenu}
@@ -362,7 +554,7 @@ export function PracticePage({ video, onBack, favorite, onFavorite }: PracticePa
             {showChinese && <p className={showEnglish ? 'focus-translation' : 'focus-sentence focus-sentence-chinese'}>{cue.chinese}</p>}
           </>}
           <div className="workbench-actions">
-            <button onClick={() => setPlaying(true)}><Icon name="volume"/>播放原句</button>
+            <button onClick={toggleSpeechPlayback}><Icon name="volume"/>{playing ? '暂停原句' : '播放原句'}</button>
             {recorder.isRecording
               ? <button className="recording-button" onClick={recorder.stop}><span/>停止并保存</button>
               : <button onClick={recorder.start}><Icon name="microphone"/>跟读录音</button>}
@@ -394,6 +586,7 @@ export function PracticePage({ video, onBack, favorite, onFavorite }: PracticePa
                     <InteractiveSentence
                       text={item.english}
                       cue={item}
+                      activeWordIndex={index === current ? activeWordIndex : null}
                       onOpen={openWord}
                       onScheduleClose={scheduleWordClose}
                       onContextMenu={openWordMenu}
@@ -403,7 +596,7 @@ export function PracticePage({ video, onBack, favorite, onFavorite }: PracticePa
                   {showChinese && (chineseSelfCheck
                     ? <p className="cue-copy-chinese">{item.chinese}</p>
                     : <small>{item.chinese}</small>)}
-                  <em>{cueTimestamp(item)}</em>
+                  <span className="cue-time"><Icon name="clock" size={11}/>{cueTimestamp(item)}</span>
                 </span>
               </div>
               <div className="cue-mini-actions">
@@ -450,15 +643,23 @@ function VocabularyPanel({
     <p>本句逐词释义 · {cue.wordTranslations.length} 项</p>
     <ul className="vocab-word-list" aria-label="本句逐词翻译">
       {cue.wordTranslations.map((item, index) => <li key={item.word + '-' + index}>
-        <strong>{item.word}</strong><span>{item.translation}</span>
+        <div className="vocab-word-label"><strong>{item.word}</strong><small>单词</small></div>
+        <div className="vocab-word-meaning"><span>{item.translation}</span></div>
       </li>)}
     </ul>
     {phraseEntries.length > 0 && <section className="vocab-phrase-section" aria-label="本句完整词组翻译">
       <p>本句完整词组 · {phraseEntries.length} 项</p>
-      {phraseEntries.map((entry) => <button key={entry.id} onClick={(event) => onOpenWord(event.currentTarget, entry.word, cue)}>
-        <span><strong>{entry.word}</strong><small>{entry.meaning}</small></span>
-        <em>{entry.level}</em><Icon name="volume" size={16}/>
-      </button>)}
+      <div className="vocab-phrase-list">
+        {phraseEntries.map((entry) => <button
+          key={entry.id}
+          className="vocab-phrase-item"
+          aria-label={'查看词组 ' + entry.word}
+          onClick={(event) => onOpenWord(event.currentTarget, entry.word, cue)}
+        >
+          <span className="vocab-phrase-copy"><strong>{entry.word}</strong><small>{entry.meaning}</small></span>
+          <span className="vocab-phrase-meta"><em>{entry.level}</em><Icon name="chevronRight" size={16}/></span>
+        </button>)}
+      </div>
     </section>}
   </div>
 }
