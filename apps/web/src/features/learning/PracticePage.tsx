@@ -11,6 +11,7 @@ import {
 } from 'react'
 import { ContextMenu } from '../../components/ContextMenu'
 import { DictionaryPopover, type PopoverPosition } from '../../components/DictionaryPopover'
+import { GoalCompletionModal } from '../../components/GoalCompletionModal'
 import { Icon } from '../../components/Icon'
 import {
   getVocabularyEntriesForHighlights,
@@ -19,7 +20,9 @@ import {
   segmentCueText,
 } from '../../data/dictionary'
 import { learningCues, type LearningCue, type LibraryVideo } from '../../data/library'
+import { useDailyStudyTimer } from '../../hooks/useDailyStudyTimer'
 import { useRecorder } from '../../hooks/useRecorder'
+import type { DailyStudyGoal } from '../../lib/studyGoalStore'
 import {
   addVocabularyWord,
   isInVocabulary,
@@ -213,6 +216,8 @@ export function PracticePage({ video, onBack, favorite, onFavorite }: PracticePa
   const [vocabularyNotice, setVocabularyNotice] = useState<string | null>(null)
   const [activeWordIndex, setActiveWordIndex] = useState<number | null>(null)
   const [sentenceProgress, setSentenceProgress] = useState(0)
+  const [goalCompletion, setGoalCompletion] = useState<DailyStudyGoal | null>(null)
+  const [pendingGoalCompletion, setPendingGoalCompletion] = useState<DailyStudyGoal | null>(null)
   const closeTimer = useRef<number | null>(null)
   const noticeTimer = useRef<number | null>(null)
   const activeWordRef = useRef<number | null>(null)
@@ -363,6 +368,17 @@ export function PracticePage({ video, onBack, favorite, onFavorite }: PracticePa
     updateSentenceProgress(0)
   }, [clearSpeechTimer, updateActiveWord, updateSentenceProgress])
 
+  const handleGoalReached = useCallback((goal: DailyStudyGoal) => {
+    if (recorder.isRecording) {
+      setPendingGoalCompletion(goal)
+      return
+    }
+    stopSpeech()
+    setGoalCompletion(goal)
+  }, [recorder.isRecording, stopSpeech])
+
+  useDailyStudyTimer(playing || recorder.isRecording, handleGoalReached)
+
   const toggleSpeechPlayback = useCallback(() => {
     if (typeof window === 'undefined' || !('speechSynthesis' in window) || typeof SpeechSynthesisUtterance === 'undefined') {
       setVocabularyNotice('当前浏览器不支持句子朗读')
@@ -487,6 +503,13 @@ export function PracticePage({ video, onBack, favorite, onFavorite }: PracticePa
     setActiveWord(null)
     setWordMenu(null)
   }, [current, stopSpeech])
+
+  useEffect(() => {
+    if (!pendingGoalCompletion || recorder.isRecording) return
+    stopSpeech()
+    setGoalCompletion(pendingGoalCompletion)
+    setPendingGoalCompletion(null)
+  }, [pendingGoalCompletion, recorder.isRecording, stopSpeech])
 
   const openVocabularyItem = (element: HTMLElement, word: string, wordCue: LearningCue) => {
     openWord(element, word, wordCue)
@@ -627,6 +650,7 @@ export function PracticePage({ video, onBack, favorite, onFavorite }: PracticePa
       onClose={() => setWordMenu(null)}
     />}
     {vocabularyNotice && <p className="vocabulary-notice" role="status">{vocabularyNotice}</p>}
+    {goalCompletion && <GoalCompletionModal goal={goalCompletion} onClose={() => setGoalCompletion(null)}/>}
   </div>
 }
 
