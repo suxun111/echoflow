@@ -43,9 +43,9 @@ v0.1.0 / 1b8bdc1
 
 | Ref | Tip | 独特资产 | 处置 |
 |---|---:|---|---|
-| `master` | 移动 trunk；G0 文档基线为 `d01c67e` | 最新学习端视觉、Practice UI、测试与 UI 问题证据；也含待移出 V1 的词典/生词交互 | 唯一 trunk；保留视觉骨架，按 PRD 收窄功能 |
+| `master` | 移动 trunk；本地已验证至 `0e3c912` | 最新学习端视觉、Practice UI、测试与 UI 问题证据；也含待移出 V1 的词典/生词交互 | 唯一 trunk；保留视觉骨架，按 PRD 收窄功能 |
 | `codex/g0-baseline-20260811` | `d01c67e` | 确认版 PRD、Goal、State、资产台账 | 已审核并 fast-forward 至 master；保留来源分支 |
-| `codex/g0-fresh-clone-topology-20260811` | 由 `d01c67e` 分出 | fresh-clone 共享包构建顺序修复与证据更新 | 当前 G0 修复来源分支；审核后 fast-forward 至 master |
+| `codex/g0-fresh-clone-topology-20260811` | `0e3c912` | fresh-clone 共享包构建顺序修复 | 已审核并 fast-forward 至 master；保留来源分支 |
 | `codex/daily-goal-integration` | `5acf375` | 今日目标、有效学习计时、设置、庆祝弹窗和测试 | 暂停；P2 时只迁移计时策略和测试 |
 | `codex/daily-goal-prototype` | `40f4ff0` | 早期双语 Practice/视觉分叉 | 归档；master 已取代，不合并 |
 | `codex/merge-learning-ui-fixes` | `42968ad` | 与产品代码审计源点 `42968ad` 指向同一提交 | 冗余别名；不再开发、不需合并 |
@@ -63,7 +63,7 @@ v0.1.0 / 1b8bdc1
 
 | Worktree | HEAD / 分支 | 状态与处置 |
 |---|---|---|
-| 主工作区 | 先完成 `g0-baseline@d01c67e`，随后检出 `codex/g0-fresh-clone-topology-20260811` | 当前承载 fresh-clone 修复；审核后 fast-forward 至 master |
+| 主工作区 | `master`；代码验证锚点 `0e3c912` | 已包含 G0 文档基线与 fresh-clone 构建顺序修复；等待外部恢复闭环 |
 | `0b51` | `codex/recovery-0b51-20260811@2c76de7` | tracked 成果已进入 recovery Commit；只剩 Playwright 生成目录，已在 E 盘备份，不作为源码迁移 |
 | `4efc` | detached `1b8bdc1` | clean；由 `v0.1.0` 和所有后续历史可达，只作旧基线检出位置 |
 | `5025` | `codex/recovery-5025-20260811@6c5d68c` | clean；不可变恢复证据，P2 暂停 |
@@ -261,7 +261,7 @@ G5 重新建立：静态 Web/CDN、应用运行环境、托管 PostgreSQL、私�
 - 20 个并发重复任务最终只执行一次；新实现应改测多 Worker、Outbox 重投、MOSS 响应丢失和数据库唯一事实，不能继续使用进程内 `Set/WeakMap`；
 - fresh clone 中共享包必须按依赖图先构建；应通过 workspace/Turbo 拓扑和 CI `build → test` 解决，不用“每次 lint/test 都全仓 build”掩盖顺序问题。
 
-G0 已采用低风险过渡方案：根 `dev/lint/test` 只预构建 `packages/*` 的 5 个共享包，而不是全仓 build。在 `d01c67e` 的隔离 clone 中，手工执行同等顺序已通过 lint/test/build；包含本修复 Commit 的最终 fresh clone 仍待提交后验证。是否启用现有 `turbo.json` 和缓存图留到 G1/CI 治理单独评估。
+G0 已采用低风险过渡方案：根 `dev/lint/test` 只预构建 `packages/*` 的 5 个共享包，而不是全仓 build。修复 Commit `0e3c912` 已从全引用 bundle 恢复至空目录；不做手工预构建时，冻结安装、根 lint、31 个测试和 Web/Admin/API/Worker build 全部通过。是否启用现有 `turbo.json` 和缓存图留到 G1/CI 治理单独评估。
 
 `b8b9` 的两份旧 PRD 只作需求考古；其中私人素材、Cue 循环、IndexedDB 录音、错误态和分阶段验收原则已被确认版 PRD 吸收。旧 2 GiB/MOV、无复杂续传、翻译发布链、固定验证码和旧 `/api` 接口均已失效。
 

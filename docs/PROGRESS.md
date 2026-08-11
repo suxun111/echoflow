@@ -27,9 +27,10 @@ EchoFlow 尚不具备：
 ## 当前 Git 基线
 
 ```text
-master                          唯一移动 trunk；G0 文档基线 d01c67e
+master                          唯一移动 trunk；本地已验证 0e3c912
 V1 产品代码审计源点            42968ad
-当前 G0 修复来源分支            codex/g0-fresh-clone-topology-20260811
+G0 文档基线                    d01c67e
+fresh-clone 修复来源分支        codex/g0-fresh-clone-topology-20260811@0e3c912
 codex/daily-goal-integration    5acf375
 codex/daily-goal-prototype      40f4ff0
 codex/moss-production-hardening 0baedef
@@ -54,7 +55,10 @@ codex/moss-production-hardening 0baedef
 - 已更新仓库中的确认版 PRD、Goal、State 和入口文档；
 - G0 基线文档已独立审核、提交为 `d01c67e` 并 fast-forward 至 master；
 - fresh clone 暴露的共享包 `dist` 构建顺序问题已用根命令的共享包预构建修复；
-- 当前正在提交该修复并执行最终本地 bundle 恢复验证。
+- 修复已独立审核、提交为 `0e3c912` 并 fast-forward 至 master；
+- 已创建修复后的全引用 bundle，SHA-256 为 `7D3C07B40DF2CAFC33CC5EF8C0F40186E12BF22D286DA89686EEE53F2FDA3BE6`；
+- 已从 bundle 恢复到空目录，18 个 heads/tags refs 零差异且 `git fsck --full` 通过；
+- 已在该 fresh clone 不做手工预构建，直接完成冻结安装、lint、31 个测试和 Web/Admin/API/Worker 生产构建。
 
 ## G0 外部恢复待办
 

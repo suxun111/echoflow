@@ -13,8 +13,8 @@
 | 唯一 trunk | `master` |
 | V1 产品代码审计源点 | `42968ad` |
 | G0 文档基线 | `d01c67e`，已 fast-forward 至 master |
-| 当前修复来源分支 | `codex/g0-fresh-clone-topology-20260811`，目标为审核后 fast-forward 至 master |
-| WIP | fresh-clone 构建拓扑修复与最终恢复验证 |
+| fresh-clone 修复 | `0e3c912`，已 fast-forward 至 master；来源分支为 `codex/g0-fresh-clone-topology-20260811` |
+| WIP | 外部 remote 与外部恢复验证 |
 | 产品功能开发 | 冻结 |
 | Remote | 未配置 |
 | 下一人工边界 | 选择远程仓库及可见性 |
@@ -70,10 +70,17 @@
 - 隔离复验证明先构建 `packages/*` 后，lint、31 个测试和 Web/Admin/API/Worker build 全部通过；
 - G0 采用零新增依赖的最小修复：根 `dev/lint/test` 先运行 `build:workspace-packages`；任务缓存编排器留到 G1/CI 治理时单独决定。
 
+### 修复后本地恢复验证
+
+- fresh-clone 修复已独立审核、提交为 `0e3c912` 并 fast-forward 至 `master`；
+- 从修复后的 master 创建 `EchoFlow-g0-code-0e3c912-20260811.bundle`，SHA-256 为 `7D3C07B40DF2CAFC33CC5EF8C0F40186E12BF22D286DA89686EEE53F2FDA3BE6`；
+- 从该 bundle 克隆至全新目录，18 个 heads/tags refs 零不匹配，`git fsck --full` 通过，恢复后的 HEAD 精确为 `0e3c912`；
+- 在该 fresh clone 中不做手工预构建，直接执行 `pnpm install --frozen-lockfile`、`pnpm lint`、`pnpm test` 和 `pnpm build`，全部通过；
+- 测试共 31 个：Web 24、API 3、Worker 2、Database 2；Web、Admin、API、Worker 生产构建全部通过；
+- 以上只证明可重复安装、静态检查、现有自动化测试与构建，不证明真实 PostgreSQL、Redis、MinIO、MOSS 或生产部署闭环。
+
 ## 当前进行中
 
-- 审核并提交 fresh-clone 构建拓扑修复；
-- 为修复后的 master 创建最终本地 Git bundle，并从空目录重新执行 install/lint/test/build；
 - 等待用户选择外部 remote 和可见性。
 
 ## G0 剩余退出条件
@@ -84,10 +91,12 @@
 - [x] README/AGENTS/Progress 不再把过期状态交给 Agent；
 - [x] G0 文档变更通过独立审核并提交为 `d01c67e`；
 - [x] 将审核通过的 G0 基线 fast-forward 至 `master`，唯一 trunk 自身已包含 PRD/Goal/State/资产台账；
+- [x] fresh-clone 构建拓扑修复通过独立审核、提交为 `0e3c912` 并 fast-forward 至 `master`；
+- [x] 从修复后的本地全引用 bundle 恢复到空目录，完成 refs、fsck、冻结安装、lint、31 个测试与生产构建验证；
 - [ ] 配置外部 remote；
 - [ ] 推送 master、recovery、archive、hardening、daily-goal 和旧 tags；
 - [ ] 从空目录 clone 外部 remote，并验证 refs 和 `git fsck --full`；
-- [ ] 在 fresh clone 执行 `pnpm install --frozen-lockfile`、`pnpm lint`、`pnpm test` 和 `pnpm build`；
+- [ ] 在外部 remote 的 fresh clone 执行 `pnpm install --frozen-lockfile`、`pnpm lint`、`pnpm test` 和 `pnpm build`；
 
 以下是 G0 关闭后的可选治理动作，不是退出条件：用户可选择继续保留，或另行确认清理旧 worktree、冗余 alias/ref 和本地恢复目录。
 
