@@ -1,5 +1,7 @@
 # EchoFlow API 契约
 
+> 状态说明：本文记录当前原型接口，不是已冻结的 V1 生产契约。V1 目标统一使用 `/api/v1`、真实认证、PostgreSQL 和 owner scope；详细边界见 [EchoFlow V1 PRD](EchoFlow-V1-PRD.md)。G1 完成前不得把本文中的开发验证码、内存任务或原型 refresh 行为用于公网。
+
 更新时间：2026-07-18
 
 API 默认前缀为 `/api`，开发端口为 `3001`。请求与响应的核心结构由 `packages/contracts` 中的 Zod schema 维护。

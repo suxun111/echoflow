@@ -1,43 +1,74 @@
-# EchoFlow Monorepo 拆分进度
+# EchoFlow 项目进度
 
-更新时间：2026-07-18
+更新时间：2026-08-11
 
-## 已完成
+动态任务状态以 [Execution State](EXECUTION-STATE.md) 为准，产品目标以 [V1 PRD](EchoFlow-V1-PRD.md) 为准。
 
-- 已建立 pnpm Monorepo，共识别 10 个工作区。
-- 已创建 `apps/web`、`apps/admin`、`apps/api`、`apps/worker`。
-- 已创建 `packages/contracts`、`packages/config`、`packages/ui`、`packages/storage`、`packages/database`。
-- 用户端已从单一 `App.tsx` 拆分为资源库、学习页、上传、账户与平台布局模块。
-- 已建立 NestJS 业务模块、Worker 模拟媒体管线、Prisma PostgreSQL Schema 和运营后台骨架。
-- pnpm 锁文件已生成，当前依赖足以执行 TypeScript 构建。
-- 以下共享包构建通过：contracts、config、ui、storage、database。
-- Worker 构建通过。
-- 已修复 API 上传预签名依赖的 storage 声明产物滞后问题。
-- 已修复 API e2e 测试中的 Nest 依赖注入与 `NODE_ENV=production` 环境隔离问题。
-- API、Web、Admin、Worker 与共享包已通过全仓 lint、test、build。
-- 已将 Web 端单一 `styles.css` 拆分为 base、layout、library、study、uploads、responsive 样式模块。
-- 已添加 Docker Compose 开发基础设施：Postgres、Redis、MinIO 与 bucket 初始化。
-- 已补充根 README、架构说明、API 契约和工作区边界文档。
-- 已执行最终 Git 状态检查；仓库当前无提交历史，项目文件整体仍为未跟踪状态。
+## 当前判断
 
-## 当前恢复点
+EchoFlow 已具备：
 
-全仓验证已通过：
+- React/Vite 学习端与管理端原型；
+- NestJS API、BullMQ Worker、Prisma、Storage、Config 和 Contracts 骨架；
+- 较完整的视觉语言和部分本地录音、词汇交互原型；其中词典/生词功能不属于 V1；
+- 多条历史实验分支中的认证、私有上传、MOSS、迁移和 E2E 候选资产。
+
+EchoFlow 尚不具备：
+
+- master 上真实的个人长视频上传闭环；
+- PostgreSQL 业务事实源；
+- 可公开使用的认证和 owner 权限；
+- 可恢复的 Outbox/Worker/MOSS 完整流水线；
+- 真实媒体、完整字幕、逐句练习和进度恢复纵向链路；
+- CI、外部 remote、生产发布和恢复闭环。
+
+因此当前可以用于原型展示和本地工程审查，不能承载真实用户私人数据或公开部署。
+
+## 当前 Git 基线
 
 ```text
-pnpm lint
-pnpm test
-pnpm build
+master                          42968ad
+codex/daily-goal-integration    5acf375
+codex/daily-goal-prototype      40f4ff0
+codex/moss-production-hardening 0baedef
 ```
 
-下一步可从实际业务实现、接口持久化或前端对接 API 开始。
+历史标签存在分叉语义，暂不重写；新版本线计划从 `v0.5.0-alpha.1` 开始。
 
-## 尚未完成
+## G0 已完成
 
-- 将原型骨架推进为持久化业务实现。
-- 前端接入真实 API，并替换当前静态演示数据。
-- 根据实际部署目标固化生产镜像与运行配置。
+- 四个 dirty worktree 已做 E 盘文件级备份和 SHA-256 校验；
+- 创建四条 recovery 分支；
+- 创建两条 detached archive 分支；
+- 创建包含全部 refs 的 Git bundle；
+- 从 bundle 在空目录恢复并通过 `git fsck --full`；
+- 确认版 V1 PRD 已复制进当前 G0 baseline 分支。
 
-## Git 状态
+## G0 本地收敛
 
-当前项目文件仍为未提交状态；本次恢复点只写入磁盘，没有执行暂存或提交。
+- 已完成 [历史分支资产台账](G0-BRANCH-ASSET-INVENTORY.md)；
+- 已区分保留、迁移、参考重写、暂停、归档和淘汰资产；
+- 已确认所有旧实现都不能整体合并，master 是唯一代码基线；
+- 已更新仓库中的确认版 PRD、Goal、State 和入口文档；
+- 当前正在完成文档提交和第二个本地 bundle 恢复验证。
+
+## G0 外部恢复待办
+
+- 用户选择远程平台、仓库 URL 和可见性；
+- 将审核通过的 G0 文档提交并回唯一 trunk；
+- 推送 master、recovery、archive、hardening、daily-goal 和旧 tags；
+- 从外部 remote 在全新目录 clone；
+- 比对 refs、执行 `git fsck --full`，并在 fresh clone 完成 install/lint/test/build；
+- 外部恢复闭环完成后，用户可选择保留或另行确认清理旧 worktree。
+
+## G0 之后
+
+```text
+G1 契约、数据库、身份和安全
+→ G2 长视频上传与可播放资产
+→ G3 MOSS 与完整字幕原子发布
+→ G4 真实播放器与影子练习
+→ G5 生产加固与邀请制 Alpha
+```
+
+上一 Gate 没有证据通过时，不开始下一 Gate。

@@ -1,11 +1,36 @@
 # EchoFlow
 
-EchoFlow 是一个英语视频影子学习平台 monorepo，包含学习端、运营后台、API、异步媒体处理 Worker 与共享基础包。
+EchoFlow V1 是一个私人英语长视频影子学习工具。目标链路是：
+
+```text
+私人 MP4 上传
+→ 对象存储与持久任务
+→ MOSS 完整英文字幕
+→ 5–10 分钟学习单元
+→ 逐句循环、录音回听和进度恢复
+```
+
+当前仓库仍处于高保真原型和工程骨架阶段，目标架构尚未全部接通。不要根据页面、接口或 Worker 文件存在就判断功能已经完成。
+
+## 当前执行基线
+
+- 唯一代码基线：`master@42968ad`；
+- 当前 Goal：`v0.5.0-alpha.1`；
+- 当前 Gate：G0 成果保护与唯一主线；
+- 产品功能开发暂时冻结，先完成历史成果收敛和远程恢复能力；
+- recovery、hardening、daily-goal 分支不得整体盲合。
+
+开始开发或审查前依次阅读：
+
+1. [当前执行状态](docs/EXECUTION-STATE.md)
+2. [v0.5.0-alpha.1 Goal](docs/GOAL-v0.5.0-alpha.1.md)
+3. [EchoFlow V1 PRD](docs/EchoFlow-V1-PRD.md)
+4. [G0 分支资产台账](docs/G0-BRANCH-ASSET-INVENTORY.md)
 
 ## 工作区
 
-- `apps/web`：React + Vite 学习端，覆盖课程库、逐句练习、录音与个人上传入口。
-- `apps/admin`：React + Vite 运营后台骨架，覆盖内容候选、授权审核、媒资字幕与处理任务视图。
+- `apps/web`：React + Vite 学习端；当前含课程库、练习、录音和上传原型，V1 将收敛到“我的视频”。
+- `apps/admin`：React + Vite 管理端骨架；V1 只保留内部任务支持能力。
 - `apps/api`：NestJS API，提供健康检查、认证、课程、字幕、进度、上传、任务与管理端接口。
 - `apps/worker`：BullMQ 媒体处理 Worker 骨架，模拟转码、转写、翻译、分句、发布流程。
 - `packages/contracts`：Zod 契约和跨端共享类型。
@@ -34,6 +59,10 @@ pnpm --filter @online-learning/worker dev
 
 更多说明见：
 
+- [V1 PRD](docs/EchoFlow-V1-PRD.md)
+- [Goal](docs/GOAL-v0.5.0-alpha.1.md)
+- [Execution State](docs/EXECUTION-STATE.md)
+- [G0 分支资产台账](docs/G0-BRANCH-ASSET-INVENTORY.md)
 - [架构说明](docs/ARCHITECTURE.md)
 - [API 契约](docs/API.md)
 - [工作区边界](docs/WORKSPACES.md)
