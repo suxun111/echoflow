@@ -6,8 +6,8 @@
   "scripts": {
     "dev": "pnpm --parallel --filter './apps/*' dev",
     "build": "pnpm -r --if-present build",
-    "test": "pnpm -r --if-present test",
-    "lint": "pnpm -r --if-present lint",
+    "test": "pnpm -r --if-present build && pnpm -r --if-present test",
+    "lint": "pnpm -r --if-present build && pnpm -r --if-present lint",
     "db:generate": "pnpm --filter @online-learning/database generate",
     "db:migrate": "pnpm --filter @online-learning/database migrate",
     "db:seed": "pnpm --filter @online-learning/database seed",
