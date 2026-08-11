@@ -27,7 +27,9 @@ EchoFlow 尚不具备：
 ## 当前 Git 基线
 
 ```text
-master                          42968ad
+master                          唯一移动 trunk；G0 文档基线 d01c67e
+V1 产品代码审计源点            42968ad
+当前 G0 修复来源分支            codex/g0-fresh-clone-topology-20260811
 codex/daily-goal-integration    5acf375
 codex/daily-goal-prototype      40f4ff0
 codex/moss-production-hardening 0baedef
@@ -48,14 +50,15 @@ codex/moss-production-hardening 0baedef
 
 - 已完成 [历史分支资产台账](G0-BRANCH-ASSET-INVENTORY.md)；
 - 已区分保留、迁移、参考重写、暂停、归档和淘汰资产；
-- 已确认所有旧实现都不能整体合并，master 是唯一代码基线；
+- 已确认所有旧实现都不能整体合并，master 是唯一 trunk；
 - 已更新仓库中的确认版 PRD、Goal、State 和入口文档；
-- 当前正在完成文档提交和第二个本地 bundle 恢复验证。
+- G0 基线文档已独立审核、提交为 `d01c67e` 并 fast-forward 至 master；
+- fresh clone 暴露的共享包 `dist` 构建顺序问题已用根命令的共享包预构建修复；
+- 当前正在提交该修复并执行最终本地 bundle 恢复验证。
 
 ## G0 外部恢复待办
 
 - 用户选择远程平台、仓库 URL 和可见性；
-- 将审核通过的 G0 文档提交并回唯一 trunk；
 - 推送 master、recovery、archive、hardening、daily-goal 和旧 tags；
 - 从外部 remote 在全新目录 clone；
 - 比对 refs、执行 `git fsck --full`，并在 fresh clone 完成 install/lint/test/build；

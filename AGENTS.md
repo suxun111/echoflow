@@ -39,13 +39,14 @@ EchoFlow V1 是一个私人英语长视频影子学习工具：用户上传自�
 ## 常用命令
 
 ```powershell
+pnpm run build:workspace-packages
 pnpm --filter @online-learning/web dev
 pnpm --filter @online-learning/web lint
 pnpm --filter @online-learning/web test
 pnpm --filter @online-learning/web build
 ```
 
-需要全仓验证时再运行根目录的 `pnpm lint`、`pnpm test` 和 `pnpm build`。依赖安装使用 pnpm 11.9，并优先执行 `pnpm install --frozen-lockfile`。
+fresh clone 或清理过 `dist` 后，先构建共享包再运行定向应用命令。根目录的 `pnpm dev`、`pnpm lint` 和 `pnpm test` 已自动执行这一步；需要全仓验证时运行根目录的 `pnpm lint`、`pnpm test` 和 `pnpm build`。依赖安装使用 pnpm 11.9，并优先执行 `pnpm install --frozen-lockfile`。
 
 ## 验证原则
 

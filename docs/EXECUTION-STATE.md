@@ -10,9 +10,11 @@
 |---|---|
 | Goal | `v0.5.0-alpha.1` |
 | Gate | `G0 成果保护与唯一主线` |
-| G0 文档来源分支 | `codex/g0-baseline-20260811`（用于审核并 fast-forward 至 master） |
-| 唯一代码基线 | `master@42968ad` |
-| WIP | G0 本地基线审核、提交与恢复验证 |
+| 唯一 trunk | `master` |
+| V1 产品代码审计源点 | `42968ad` |
+| G0 文档基线 | `d01c67e`，已 fast-forward 至 master |
+| 当前修复来源分支 | `codex/g0-fresh-clone-topology-20260811`，目标为审核后 fast-forward 至 master |
+| WIP | fresh-clone 构建拓扑修复与最终恢复验证 |
 | 产品功能开发 | 冻结 |
 | Remote | 未配置 |
 | 下一人工边界 | 选择远程仓库及可见性 |
@@ -48,12 +50,12 @@
 | `codex/recovery-b8b9-20260811` | `f2c6e0b` | 旧 PRD 与早期 Worker 实验 |
 | `codex/recovery-f24e-20260811` | `299e6e1` | 更完整媒体处理、词汇/翻译实验 |
 | `codex/archive-detached-2eeb078-20260811` | `2eeb078` | 早期 Auth UI/API 实验 |
-| `codex/archive-detached-9942c38-20260811` | `9942c38` | 与 master 相同 tree 的历史 Commit |
+| `codex/archive-detached-9942c38-20260811` | `9942c38` | 与产品代码审计源点 `42968ad` 相同 tree 的历史 Commit |
 
 ## G0 第二轮本地结论
 
 - [G0 分支资产台账](G0-BRANCH-ASSET-INVENTORY.md) 已完成领域级分类；
-- `master@42968ad` 确认为唯一代码基线；
+- `master` 确认为唯一移动 trunk；`42968ad` 保留为 V1 产品代码审计源点，不再冒充当前 master Tip；
 - recovery/hardening 分支只允许选择性提取，禁止整体 merge；
 - hardening 中的认证、数据库、Worker 和部署实现均不符合完整 V1，只保留约束、错误分类、恢复与测试思想；
 - `0b51` 优先参考严格字幕原子发布和学习交互；
@@ -61,10 +63,17 @@
 - daily goal、streak、翻译、词汇和公共内容明确暂停或淘汰；
 - 仓库入口已经指向确认版 PRD、Goal、State 和资产台账。
 
+### fresh-clone 构建拓扑发现
+
+- 在 bundle 恢复目录对 `d01c67e` 执行 `pnpm install --frozen-lockfile` 成功；
+- 随后的原根 `pnpm lint` 失败，API/Admin/Worker 无法解析共享包，因为它们的 `types/main/exports` 指向未跟踪的 `dist`，而递归 lint 的上游任务使用 `tsc --noEmit`；
+- 隔离复验证明先构建 `packages/*` 后，lint、31 个测试和 Web/Admin/API/Worker build 全部通过；
+- G0 采用零新增依赖的最小修复：根 `dev/lint/test` 先运行 `build:workspace-packages`；任务缓存编排器留到 G1/CI 治理时单独决定。
+
 ## 当前进行中
 
-- 审核并提交 G0 本地基线文档；
-- 为该提交创建新的本地 Git bundle 并从空目录恢复验证；
+- 审核并提交 fresh-clone 构建拓扑修复；
+- 为修复后的 master 创建最终本地 Git bundle，并从空目录重新执行 install/lint/test/build；
 - 等待用户选择外部 remote 和可见性。
 
 ## G0 剩余退出条件
@@ -73,8 +82,8 @@
 - [x] 每项候选成果有“迁移、参考、暂停、归档”结论；
 - [x] 确认版 PRD 已进入当前基线分支；
 - [x] README/AGENTS/Progress 不再把过期状态交给 Agent；
-- [ ] G0 文档变更通过审核并提交；
-- [ ] 将审核通过的 G0 基线提交并回 `master`，确保唯一 trunk 自身包含 PRD/Goal/State/资产台账；
+- [x] G0 文档变更通过独立审核并提交为 `d01c67e`；
+- [x] 将审核通过的 G0 基线 fast-forward 至 `master`，唯一 trunk 自身已包含 PRD/Goal/State/资产台账；
 - [ ] 配置外部 remote；
 - [ ] 推送 master、recovery、archive、hardening、daily-goal 和旧 tags；
 - [ ] 从空目录 clone 外部 remote，并验证 refs 和 `git fsck --full`；

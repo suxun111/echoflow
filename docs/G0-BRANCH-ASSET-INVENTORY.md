@@ -8,7 +8,7 @@
 
 ## 最终决策
 
-1. `master@42968ad` 是唯一代码基线；`codex/g0-baseline-20260811` 只承载 G0 基线文档，审核后再并回唯一 trunk。
+1. `master` 是唯一移动 trunk；`42968ad` 是 V1 产品代码审计源点，`d01c67e` 是已经进入 master 的 G0 文档基线。
 2. 不整体 merge 任何 recovery、hardening、daily-goal 或 archive 分支。
 3. 不整笔 cherry-pick `43f40ec`、`0baedef`、`2c76de7`、`299e6e1` 等快照提交。
 4. 历史实现只允许按领域、按文件或按测试场景选择性提取，并在新提交中记录来源 Ref 和与 V1 的差异。
@@ -31,7 +31,7 @@
 ```text
 v0.1.0 / 1b8bdc1
 ├─ 学习端主线
-│  └─ 42968ad = v0.2.0 = v0.4.1 = master
+│  └─ 42968ad = v0.2.0 = v0.4.1（G0 审计时的 master 产品代码源点）
 └─ 后端硬化支线
    ├─ 43f40ec = v0.3.0
    └─ 0baedef = v0.4.0
@@ -43,26 +43,27 @@ v0.1.0 / 1b8bdc1
 
 | Ref | Tip | 独特资产 | 处置 |
 |---|---:|---|---|
-| `master` | `42968ad` | 最新学习端视觉、Practice UI、测试与 UI 问题证据；也含待移出 V1 的词典/生词交互 | 唯一 trunk；保留视觉骨架，按 PRD 收窄功能 |
-| `codex/g0-baseline-20260811` | 基于 `42968ad` | 确认版 PRD、Goal、State、资产台账 | 当前 G0 文档分支；审核后并回 trunk |
+| `master` | 移动 trunk；G0 文档基线为 `d01c67e` | 最新学习端视觉、Practice UI、测试与 UI 问题证据；也含待移出 V1 的词典/生词交互 | 唯一 trunk；保留视觉骨架，按 PRD 收窄功能 |
+| `codex/g0-baseline-20260811` | `d01c67e` | 确认版 PRD、Goal、State、资产台账 | 已审核并 fast-forward 至 master；保留来源分支 |
+| `codex/g0-fresh-clone-topology-20260811` | 由 `d01c67e` 分出 | fresh-clone 共享包构建顺序修复与证据更新 | 当前 G0 修复来源分支；审核后 fast-forward 至 master |
 | `codex/daily-goal-integration` | `5acf375` | 今日目标、有效学习计时、设置、庆祝弹窗和测试 | 暂停；P2 时只迁移计时策略和测试 |
 | `codex/daily-goal-prototype` | `40f4ff0` | 早期双语 Practice/视觉分叉 | 归档；master 已取代，不合并 |
-| `codex/merge-learning-ui-fixes` | `42968ad` | 与 master 指向同一提交 | 冗余别名；不再开发、不需合并 |
+| `codex/merge-learning-ui-fixes` | `42968ad` | 与产品代码审计源点 `42968ad` 指向同一提交 | 冗余别名；不再开发、不需合并 |
 | `codex/moss-production-hardening` | `0baedef` | 数据库模块、错误/请求 ID、认证边界、Worker 恢复和部署实验 | 参考重写；禁止整分支或整提交迁移 |
 | `codex/recovery-0b51-20260811` | `2c76de7` | 私有 MP4、严格完整字幕发布、学习页视频控制和 Cue 交互 | 选择性参考；学习交互与原子发布语义优先 |
 | `codex/recovery-f24e-20260811` | `299e6e1` | 更完整的 MOSS 错误/恢复、最近任务、Web 轮询恢复、词汇翻译实验 | 选择性参考；容错资产优先，词汇翻译暂停 |
 | `codex/recovery-5025-20260811` | `6c5d68c` | 今日目标、连续学习、日期边界测试、需求文档和截图 | 不可变恢复证据；V1 暂停 |
 | `codex/recovery-b8b9-20260811` | `f2c6e0b` | 两份旧 PRD、fresh-clone 构建顺序问题、并发重复任务测试意图 | 归档/需求考古；无独特真实后端可迁移 |
 | `codex/archive-detached-2eeb078-20260811` | `2eeb078` | 登录注册 UI、倒计时/错误态和认证测试意图 | Auth UI 参考；后端和 Session 实现淘汰 |
-| `codex/archive-detached-9942c38-20260811` | `9942c38` | 文件树与 master 完全相同 | 冗余归档；无代码可迁移 |
+| `codex/archive-detached-9942c38-20260811` | `9942c38` | 文件树与产品代码审计源点 `42968ad` 完全相同 | 冗余归档；无代码可迁移 |
 
 ## Worktree 处置台账
 
-以下状态在 2026-08-11 复核。Worktree 本身只是检出位置；是否有独特资产由对应 Commit、recovery ref 和文件级备份共同判断。
+以下是 2026-08-11 本轮提交前的复核快照。Worktree 本身只是检出位置；是否有独特资产由对应 Commit、recovery ref 和文件级备份共同判断。
 
 | Worktree | HEAD / 分支 | 状态与处置 |
 |---|---|---|
-| 主工作区 | `codex/g0-baseline-20260811`，基于 `42968ad` | 当前 G0 文档工作区；提交后并回 master |
+| 主工作区 | 先完成 `g0-baseline@d01c67e`，随后检出 `codex/g0-fresh-clone-topology-20260811` | 当前承载 fresh-clone 修复；审核后 fast-forward 至 master |
 | `0b51` | `codex/recovery-0b51-20260811@2c76de7` | tracked 成果已进入 recovery Commit；只剩 Playwright 生成目录，已在 E 盘备份，不作为源码迁移 |
 | `4efc` | detached `1b8bdc1` | clean；由 `v0.1.0` 和所有后续历史可达，只作旧基线检出位置 |
 | `5025` | `codex/recovery-5025-20260811@6c5d68c` | clean；不可变恢复证据，P2 暂停 |
@@ -71,7 +72,7 @@ v0.1.0 / 1b8bdc1
 | `795f` | detached `d656491` | clean；与 `692b` 重复，无独特未提交资产 |
 | `8750` | `codex/moss-production-hardening@0baedef` | clean；只读参考，不整体迁移 |
 | `b8b9` | `codex/recovery-b8b9-20260811@f2c6e0b` | clean；旧 PRD/测试意图恢复证据 |
-| `b91f` | detached `9942c38` | clean；已有 archive ref，文件树等同 master |
+| `b91f` | detached `9942c38` | clean；已有 archive ref，文件树等同产品代码审计源点 `42968ad` |
 | `daily-goal-integration` | `codex/daily-goal-integration@5acf375` | clean；Dormant P2 分支 |
 | `f24e` | `codex/recovery-f24e-20260811@299e6e1` | tracked 成果已进入 recovery Commit；只剩 Playwright 生成目录，已在 E 盘备份，不作为源码迁移 |
 
@@ -81,7 +82,7 @@ v0.1.0 / 1b8bdc1
 
 ### 1. 学习端视觉与页面骨架
 
-首选来源：`master@42968ad`。
+首选产品代码来源：`42968ad`（G0 文档进入前的 master 产品代码审计源点）。
 
 保留：
 
@@ -259,6 +260,8 @@ G5 重新建立：静态 Web/CDN、应用运行环境、托管 PostgreSQL、私�
 
 - 20 个并发重复任务最终只执行一次；新实现应改测多 Worker、Outbox 重投、MOSS 响应丢失和数据库唯一事实，不能继续使用进程内 `Set/WeakMap`；
 - fresh clone 中共享包必须按依赖图先构建；应通过 workspace/Turbo 拓扑和 CI `build → test` 解决，不用“每次 lint/test 都全仓 build”掩盖顺序问题。
+
+G0 已采用低风险过渡方案：根 `dev/lint/test` 只预构建 `packages/*` 的 5 个共享包，而不是全仓 build。在 `d01c67e` 的隔离 clone 中，手工执行同等顺序已通过 lint/test/build；包含本修复 Commit 的最终 fresh clone 仍待提交后验证。是否启用现有 `turbo.json` 和缓存图留到 G1/CI 治理单独评估。
 
 `b8b9` 的两份旧 PRD 只作需求考古；其中私人素材、Cue 循环、IndexedDB 录音、错误态和分阶段验收原则已被确认版 PRD 吸收。旧 2 GiB/MOV、无复杂续传、翻译发布链、固定验证码和旧 `/api` 接口均已失效。
 

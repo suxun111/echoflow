@@ -1,6 +1,6 @@
 # EchoFlow 架构说明
 
-> 状态说明：本文主要描述 `master@42968ad` 的当前工程骨架，不代表 V1 目标已经实现。目标架构和已确认边界见 [EchoFlow V1 PRD](EchoFlow-V1-PRD.md)，当前执行状态见 [Execution State](EXECUTION-STATE.md)。
+> 状态说明：本文主要描述产品代码审计源点 `42968ad` 的工程骨架，不代表 V1 目标已经实现。目标架构和已确认边界见 [EchoFlow V1 PRD](EchoFlow-V1-PRD.md)，当前执行状态见 [Execution State](EXECUTION-STATE.md)。
 
 更新时间：2026-07-18
 

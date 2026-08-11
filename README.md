@@ -14,7 +14,8 @@ EchoFlow V1 是一个私人英语长视频影子学习工具。目标链路是�
 
 ## 当前执行基线
 
-- 唯一代码基线：`master@42968ad`；
+- 唯一 trunk：`master`；
+- V1 产品代码审计源点：`42968ad`；G0 文档基线：`d01c67e`；
 - 当前 Goal：`v0.5.0-alpha.1`；
 - 当前 Gate：G0 成果保护与唯一主线；
 - 产品功能开发暂时冻结，先完成历史成果收敛和远程恢复能力；
@@ -43,6 +44,7 @@ EchoFlow V1 是一个私人英语长视频影子学习工具。目标链路是�
 
 ```powershell
 pnpm install --frozen-lockfile
+pnpm run build:workspace-packages
 pnpm lint
 pnpm test
 pnpm build
@@ -52,6 +54,8 @@ pnpm --filter @online-learning/admin dev
 pnpm --filter @online-learning/api dev
 pnpm --filter @online-learning/worker dev
 ```
+
+根 `dev`、`lint` 和 `test` 会先构建 `packages/*`，因此可在 fresh clone 直接运行。若只执行某个 `apps/*` 的定向命令，先运行一次 `pnpm run build:workspace-packages`，避免共享包尚无 `dist` 导致解析失败。
 
 ## 本地环境
 
