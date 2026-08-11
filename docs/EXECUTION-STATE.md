@@ -9,15 +9,15 @@
 | 字段 | 当前值 |
 |---|---|
 | Goal | `v0.5.0-alpha.1` |
-| Gate | `G0 成果保护与唯一主线` |
+| Gate | `G0 已关闭；待启动 G1` |
 | 唯一 trunk | `master` |
 | V1 产品代码审计源点 | `42968ad` |
 | G0 文档基线 | `d01c67e`，已 fast-forward 至 master |
 | fresh-clone 修复 | `0e3c912`，已 fast-forward 至 master；来源分支为 `codex/g0-fresh-clone-topology-20260811` |
-| WIP | 外部 remote 与外部恢复验证 |
-| 产品功能开发 | 冻结 |
-| Remote | 未配置 |
-| 下一人工边界 | 选择远程仓库及可见性 |
+| WIP | 等待 G1 任务合同 |
+| 产品功能开发 | 冻结至用户确认开始 G1 |
+| Remote | `origin = https://github.com/suxun111/echoflow.git`；Private；外部恢复验证通过 |
+| 下一人工边界 | 确认进入 G1 契约、数据库、身份和安全 |
 
 ## 2026-08-11 决策澄清
 
@@ -79,11 +79,21 @@
 - 测试共 31 个：Web 24、API 3、Worker 2、Database 2；Web、Admin、API、Worker 生产构建全部通过；
 - 以上只证明可重复安装、静态检查、现有自动化测试与构建，不证明真实 PostgreSQL、Redis、MinIO、MOSS 或生产部署闭环。
 
-## 当前进行中
+### GitHub 外部恢复验证
 
-- 等待用户选择外部 remote 和可见性。
+- GitHub 仓库 `suxun111/echoflow` 确认为 Private，默认分支为 `master`；
+- 推送全部 13 条本地分支和 5 个历史标签成功；
+- 从 GitHub 克隆至全新目录 `E:\33442\ai\backups\EchoFlow\G0-20260811-145052\restore-check-github-3c07e4e`；
+- source / GitHub clone 的 heads + tags 均为 18，零不匹配；`git fsck --full` 通过，恢复工作树干净；
+- 外部验证锚点为 `3c07e4e`，source HEAD 与 GitHub clone HEAD 精确一致；
+- 在该 GitHub fresh clone 中执行 `pnpm install --frozen-lockfile`、`pnpm lint`、`pnpm test` 和 `pnpm build`，全部通过；
+- 测试仍为 31 个，Web、Admin、API、Worker 生产构建全部通过；该证据边界仍不包含真实 PostgreSQL、Redis、MinIO、MOSS 和生产部署。
 
-## G0 剩余退出条件
+## 当前等待
+
+- 用户确认是否开始 G1：契约、数据库、身份和安全。
+
+## G0 退出条件（已全部完成）
 
 - [x] 分支和 worktree 资产完成领域级分类；
 - [x] 每项候选成果有“迁移、参考、暂停、归档”结论；
@@ -93,10 +103,12 @@
 - [x] 将审核通过的 G0 基线 fast-forward 至 `master`，唯一 trunk 自身已包含 PRD/Goal/State/资产台账；
 - [x] fresh-clone 构建拓扑修复通过独立审核、提交为 `0e3c912` 并 fast-forward 至 `master`；
 - [x] 从修复后的本地全引用 bundle 恢复到空目录，完成 refs、fsck、冻结安装、lint、31 个测试与生产构建验证；
-- [ ] 配置外部 remote；
-- [ ] 推送 master、recovery、archive、hardening、daily-goal 和旧 tags；
-- [ ] 从空目录 clone 外部 remote，并验证 refs 和 `git fsck --full`；
-- [ ] 在外部 remote 的 fresh clone 执行 `pnpm install --frozen-lockfile`、`pnpm lint`、`pnpm test` 和 `pnpm build`；
+- [x] 配置 Private GitHub `origin`；
+- [x] 推送全部 13 条本地分支和 5 个历史标签；
+- [x] 从空目录 clone 外部 remote，并验证 18 个 heads/tags refs、HEAD 和 `git fsck --full`；
+- [x] 在外部 remote 的 fresh clone 执行 `pnpm install --frozen-lockfile`、`pnpm lint`、`pnpm test` 和 `pnpm build`；
+
+G0 于 2026-08-11 完成退出条件并关闭。G1 必须从新的任务合同、分支和验收门开始，不把 G0 的工程绿色误当成生产能力。
 
 以下是 G0 关闭后的可选治理动作，不是退出条件：用户可选择继续保留，或另行确认清理旧 worktree、冗余 alias/ref 和本地恢复目录。
 

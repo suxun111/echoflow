@@ -20,14 +20,14 @@ EchoFlow 尚不具备：
 - 可公开使用的认证和 owner 权限；
 - 可恢复的 Outbox/Worker/MOSS 完整流水线；
 - 真实媒体、完整字幕、逐句练习和进度恢复纵向链路；
-- CI、外部 remote、生产发布和恢复闭环。
+- CI、生产发布和真实基础设施恢复闭环。
 
 因此当前可以用于原型展示和本地工程审查，不能承载真实用户私人数据或公开部署。
 
 ## 当前 Git 基线
 
 ```text
-master                          唯一移动 trunk；本地已验证 0e3c912
+master                          唯一移动 trunk；GitHub 外部验证锚点 3c07e4e
 V1 产品代码审计源点            42968ad
 G0 文档基线                    d01c67e
 fresh-clone 修复来源分支        codex/g0-fresh-clone-topology-20260811@0e3c912
@@ -60,13 +60,13 @@ codex/moss-production-hardening 0baedef
 - 已从 bundle 恢复到空目录，18 个 heads/tags refs 零差异且 `git fsck --full` 通过；
 - 已在该 fresh clone 不做手工预构建，直接完成冻结安装、lint、31 个测试和 Web/Admin/API/Worker 生产构建。
 
-## G0 外部恢复待办
+## G0 外部恢复完成
 
-- 用户选择远程平台、仓库 URL 和可见性；
-- 推送 master、recovery、archive、hardening、daily-goal 和旧 tags；
-- 从外部 remote 在全新目录 clone；
-- 比对 refs、执行 `git fsck --full`，并在 fresh clone 完成 install/lint/test/build；
-- 外部恢复闭环完成后，用户可选择保留或另行确认清理旧 worktree。
+- 已配置 Private GitHub remote：`https://github.com/suxun111/echoflow.git`；
+- 已推送全部 13 条本地分支和 5 个历史标签；
+- 已从 GitHub 在全新目录 clone，18 个 heads/tags refs 零差异，HEAD 精确匹配且 `git fsck --full` 通过；
+- 已在 GitHub fresh clone 完成冻结安装、lint、31 个测试和 Web/Admin/API/Worker 生产构建；
+- G0 已关闭；用户可继续保留旧 worktree，也可在未来单独确认归档或清理。
 
 ## G0 之后
 

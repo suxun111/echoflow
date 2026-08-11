@@ -63,7 +63,7 @@ v0.1.0 / 1b8bdc1
 
 | Worktree | HEAD / 分支 | 状态与处置 |
 |---|---|---|
-| 主工作区 | `master`；代码验证锚点 `0e3c912` | 已包含 G0 文档基线与 fresh-clone 构建顺序修复；等待外部恢复闭环 |
+| 主工作区 | `master`；GitHub 外部验证锚点 `3c07e4e` | 已包含 G0 文档基线与 fresh-clone 构建顺序修复；G0 已关闭，等待 G1 |
 | `0b51` | `codex/recovery-0b51-20260811@2c76de7` | tracked 成果已进入 recovery Commit；只剩 Playwright 生成目录，已在 E 盘备份，不作为源码迁移 |
 | `4efc` | detached `1b8bdc1` | clean；由 `v0.1.0` 和所有后续历史可达，只作旧基线检出位置 |
 | `5025` | `codex/recovery-5025-20260811@6c5d68c` | clean；不可变恢复证据，P2 暂停 |
@@ -287,9 +287,9 @@ G0 已采用低风险过渡方案：根 `dev/lint/test` 只预构建 `packages/*
 6. 在 Commit/PR 说明中保留 provenance；
 7. 经独立 Reviewer 对照 PRD 判断后才能并入 trunk。
 
-## 暂不执行的清理
+## G0 关闭后的清理策略
 
-在外部 remote 推送并完成全新 clone 验证前：
+Private GitHub remote 已推送，并已完成全新 clone、refs、fsck、冻结安装、lint、测试和构建验证。当前仍然：
 
 - 不删除 recovery/archive/hardening/daily-goal 分支；
 - 不删除旧 worktree；
@@ -297,4 +297,4 @@ G0 已采用低风险过渡方案：根 `dev/lint/test` 只预构建 `packages/*
 - 不修改旧标签；
 - 不删除 E 盘备份和恢复验证目录。
 
-外部恢复闭环完成后，再由用户明确确认是否归档或清理冗余 worktree/ref。
+没有执行任何清理。后续只有在用户明确确认具体目标后，才归档或清理冗余 worktree/ref；保留它们不阻塞 G1。
