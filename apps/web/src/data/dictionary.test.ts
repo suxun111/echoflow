@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  getCueVocabulary,
   getLessonVocabulary,
   getVocabularyEntriesForHighlights,
   lookupDictionaryEntry,
@@ -40,5 +41,15 @@ describe('local dictionary', () => {
 
   it('returns undefined for an unlisted term', () => {
     expect(lookupDictionaryEntry('unlisted')).toBeUndefined()
+  })
+
+  it('adapts a real cue without borrowing another sentence vocabulary', () => {
+    const vocabulary = getCueVocabulary('Welcome to my coastal town.', ['coastal town'])
+
+    expect(vocabulary.totalWordCount).toBe(5)
+    expect(vocabulary.coveredWordCount).toBe(1)
+    expect(vocabulary.words.map((item) => item.word)).toEqual(['Welcome', 'to', 'my', 'coastal', 'town'])
+    expect(vocabulary.phrases.map((entry) => entry.word)).toEqual(['coastal town'])
+    expect(vocabulary.words.filter((item) => !item.entry).map((item) => item.word)).toEqual(['to', 'my', 'coastal', 'town'])
   })
 })

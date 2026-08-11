@@ -1,14 +1,19 @@
 import { Worker } from 'bullmq'
-import type { ProcessingJob } from '@online-learning/contracts'
-import { processPipelineJob } from './processors/pipeline'
+import { loadServerEnv } from '@online-learning/config'
+import { processPipelineJob, type MediaQueueJob } from './processors/pipeline'
 
-const redisUrl = process.env.REDIS_URL
-const processedKeys = new Set<string>()
+const env = loadServerEnv()
+const worker = new Worker<MediaQueueJob>('online-learning-media', (job) => processPipelineJob(job.data), {
+  connection: { url: env.REDIS_URL },
+})
 
-if (!redisUrl) {
-  console.log('Worker skeleton ready. Set REDIS_URL to consume online-learning-media jobs.')
-} else {
-  const worker = new Worker<ProcessingJob>('online-learning-media', (job) => processPipelineJob(job.data, { processedKeys }), { connection: { url: redisUrl } })
-  worker.on('completed', (job) => console.log(`Completed media job ${job.id}`))
-  worker.on('failed', (job, error) => console.error(`Failed media job ${job?.id}: ${error.message}`))
+worker.on('completed', (job) => console.log(`Completed media job ${job.id}`))
+worker.on('failed', (job, error) => console.error(`Failed media job ${job?.id}: ${error.message}`))
+
+async function shutdown() {
+  await worker.close()
+  process.exit(0)
 }
+
+process.once('SIGINT', () => void shutdown())
+process.once('SIGTERM', () => void shutdown())

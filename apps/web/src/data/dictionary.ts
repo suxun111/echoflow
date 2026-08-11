@@ -1,4 +1,4 @@
-import type { LearningCue } from './library'
+import { getEnglishSurfaceWords, type LearningCue } from './library'
 
 export type DictionaryEntry = {
   id: string
@@ -73,6 +73,29 @@ export function getLessonVocabulary(cues: LearningCue[]): LessonVocabularyItem[]
 export type VocabularyTextSegment = {
   value: string
   entry?: DictionaryEntry
+}
+
+export type CueVocabularyWord = {
+  word: string
+  entry?: DictionaryEntry
+}
+
+export type CueVocabulary = {
+  words: CueVocabularyWord[]
+  phrases: DictionaryEntry[]
+  coveredWordCount: number
+  totalWordCount: number
+}
+
+export function getCueVocabulary(text: string, highlights: string[] = []): CueVocabulary {
+  const words = getEnglishSurfaceWords(text).map((word) => ({ word, entry: lookupDictionaryEntry(word) }))
+  const phrases = getVocabularyEntriesForHighlights(highlights)
+  return {
+    words,
+    phrases,
+    coveredWordCount: words.filter((item) => item.entry).length,
+    totalWordCount: words.length,
+  }
 }
 
 function escapeRegularExpression(value: string) {

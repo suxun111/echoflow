@@ -10,8 +10,11 @@
     "lint": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@prisma/client": "6.10.1",
     "@online-learning/config": "workspace:*",
     "@online-learning/contracts": "workspace:*",
+    "@online-learning/database": "workspace:*",
+    "@online-learning/storage": "workspace:*",
     "bullmq": "^5.56.2",
     "ioredis": "^5.6.1"
   },

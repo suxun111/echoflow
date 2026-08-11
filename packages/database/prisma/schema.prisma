@@ -22,6 +22,7 @@ enum AssetStatus {
   PUBLISHED
   REJECTED
   ARCHIVED
+  FAILED
 }
 
 enum ReviewDecision {
@@ -68,6 +69,7 @@ model VideoAsset {
   title          String
   creator        String
   coverUrl       String
+  coverStorageKey String?
   storageKey     String?
   durationMs     Int
   category       String
@@ -115,6 +117,7 @@ model SubtitleCue {
   endMs      Int
   english    String
   chinese    String           @default("")
+  speaker    String?
   keywords   Json
   reviewed   Boolean          @default(false)
   lesson     Lesson           @relation(fields: [lessonId], references: [id], onDelete: Cascade)
@@ -179,8 +182,11 @@ model Upload {
   videoAssetId    String?
   originalName    String
   storageKey      String
+  contentType     String          @default("video/mp4")
+  sizeBytes       Int             @default(0)
   rightsConfirmed Boolean
   private         Boolean         @default(true)
+  completedAt     DateTime?
   createdAt       DateTime        @default(now())
   user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   videoAsset      VideoAsset?      @relation(fields: [videoAssetId], references: [id])
