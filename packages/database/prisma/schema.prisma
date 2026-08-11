@@ -22,6 +22,7 @@ enum AssetStatus {
   PUBLISHED
   REJECTED
   ARCHIVED
+  FAILED
 }
 
 enum ReviewDecision {
@@ -46,6 +47,24 @@ enum JobStatus {
   FAILED
 }
 
+enum VocabularyTermType {
+  WORD
+  PHRASE
+}
+
+enum VocabularyTranslationSource {
+  VOLCENGINE
+  LOCAL_FALLBACK
+  NONE
+}
+
+enum VocabularyTranslationStatus {
+  TRANSLATED
+  PENDING
+  RETRYABLE_FAILED
+  PERMANENT_FAILED
+}
+
 model User {
   id             String             @id @default(cuid())
   phone          String             @unique
@@ -68,6 +87,7 @@ model VideoAsset {
   title          String
   creator        String
   coverUrl       String
+  coverStorageKey String?
   storageKey     String?
   durationMs     Int
   category       String
@@ -104,6 +124,7 @@ model Lesson {
   progresses  LearningProgress[]
   favorites   Favorite[]
   vocabulary  VocabularyItem[]
+  vocabularyTerms CourseVocabulary[]
   recordings  Recording[]
 }
 
@@ -115,10 +136,12 @@ model SubtitleCue {
   endMs      Int
   english    String
   chinese    String           @default("")
+  speaker    String?
   keywords   Json
   reviewed   Boolean          @default(false)
   lesson     Lesson           @relation(fields: [lessonId], references: [id], onDelete: Cascade)
   vocabulary VocabularyItem[]
+  vocabularyTerms CourseVocabulary[]
   recordings Recording[]
   @@unique([lessonId, order])
 }
@@ -160,6 +183,28 @@ model VocabularyItem {
   cue       SubtitleCue? @relation(fields: [cueId], references: [id], onDelete: SetNull)
 }
 
+model CourseVocabulary {
+  id                   String                       @id @default(cuid())
+  lessonId             String
+  cueId                String?
+  word                 String
+  normalizedWord       String
+  termType             VocabularyTermType
+  sourceSentence       String
+  translation          String                       @default("")
+  translationSource    VocabularyTranslationSource @default(NONE)
+  translationStatus    VocabularyTranslationStatus @default(PENDING)
+  translationErrorCode String?
+  translatedAt         DateTime?
+  createdAt            DateTime                     @default(now())
+  updatedAt            DateTime                     @updatedAt
+  lesson               Lesson                       @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  cue                  SubtitleCue?                 @relation(fields: [cueId], references: [id], onDelete: SetNull)
+
+  @@unique([lessonId, normalizedWord])
+  @@index([lessonId])
+}
+
 model Recording {
   id         String       @id @default(cuid())
   userId     String
@@ -179,8 +224,11 @@ model Upload {
   videoAssetId    String?
   originalName    String
   storageKey      String
+  contentType     String          @default("video/mp4")
+  sizeBytes       Int             @default(0)
   rightsConfirmed Boolean
   private         Boolean         @default(true)
+  completedAt     DateTime?
   createdAt       DateTime        @default(now())
   user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   videoAsset      VideoAsset?      @relation(fields: [videoAssetId], references: [id])
