@@ -11,6 +11,7 @@ import {
 } from 'react'
 import { ContextMenu } from '../../components/ContextMenu'
 import { DictionaryPopover, type PopoverPosition } from '../../components/DictionaryPopover'
+import { GoalCompletionModal } from '../../components/GoalCompletionModal'
 import { Icon } from '../../components/Icon'
 import {
   getVocabularyEntriesForHighlights,
@@ -20,10 +21,12 @@ import {
 } from '../../data/dictionary'
 import { learningCues, type LearningCue, type LibraryVideo } from '../../data/library'
 import { useRecorder } from '../../hooks/useRecorder'
+import { useDailyStudyTimer } from '../../hooks/useDailyStudyTimer'
 import {
   addVocabularyWord,
   isInVocabulary,
 } from '../../lib/vocabularyStore'
+import type { DailyStudyGoal } from '../../lib/studyGoalStore'
 
 type PracticePageProps = {
   video: LibraryVideo
@@ -167,6 +170,8 @@ export function PracticePage({ video, onBack, favorite, onFavorite }: PracticePa
   const [activeWord, setActiveWord] = useState<ActiveWord | null>(null)
   const [wordMenu, setWordMenu] = useState<WordMenu | null>(null)
   const [vocabularyNotice, setVocabularyNotice] = useState<string | null>(null)
+  const [goalCompletion, setGoalCompletion] = useState<DailyStudyGoal | null>(null)
+  const [pendingGoalCompletion, setPendingGoalCompletion] = useState<DailyStudyGoal | null>(null)
   const closeTimer = useRef<number | null>(null)
   const noticeTimer = useRef<number | null>(null)
   const cue = learningCues[current]
@@ -264,6 +269,15 @@ export function PracticePage({ video, onBack, favorite, onFavorite }: PracticePa
     setRecordingUrl(URL.createObjectURL(blob))
   }, [])
   const recorder = useRecorder(handleRecordingComplete)
+  const handleGoalReached = useCallback((goal: DailyStudyGoal) => {
+    if (recorder.isRecording) {
+      setPendingGoalCompletion(goal)
+      return
+    }
+    setPlaying(false)
+    setGoalCompletion(goal)
+  }, [recorder.isRecording])
+  useDailyStudyTimer(playing || recorder.isRecording, handleGoalReached)
   const go = (index: number) => setCurrent(Math.min(Math.max(index, 0), learningCues.length - 1))
 
   useEffect(() => () => {
@@ -301,6 +315,13 @@ export function PracticePage({ video, onBack, favorite, onFavorite }: PracticePa
     setActiveWord(null)
     setWordMenu(null)
   }, [current])
+
+  useEffect(() => {
+    if (!pendingGoalCompletion || recorder.isRecording) return
+    setPlaying(false)
+    setGoalCompletion(pendingGoalCompletion)
+    setPendingGoalCompletion(null)
+  }, [pendingGoalCompletion, recorder.isRecording])
 
   const openVocabularyItem = (element: HTMLElement, word: string, wordCue: LearningCue) => {
     openWord(element, word, wordCue)
@@ -434,6 +455,7 @@ export function PracticePage({ video, onBack, favorite, onFavorite }: PracticePa
       onClose={() => setWordMenu(null)}
     />}
     {vocabularyNotice && <p className="vocabulary-notice" role="status">{vocabularyNotice}</p>}
+    {goalCompletion && <GoalCompletionModal goal={goalCompletion} onClose={() => setGoalCompletion(null)}/>}
   </div>
 }
 

@@ -4,4 +4,6 @@
 @import './styles/library.css';
 @import './styles/study.css';
 @import './styles/uploads.css';
+@import './styles/daily-goal.css';
+@import './styles/learning-streak.css';
 @import './styles/responsive.css';
