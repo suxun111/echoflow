@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { MediaAssetView } from '@online-learning/contracts'
 import { Icon } from '../../components/Icon'
 import type { ApiClient } from '../../lib/apiClient'
@@ -19,12 +19,19 @@ export function MyVideosPage({ api, search, onUpload }: { api: ApiClient; search
   const resumeTime = useRef(0)
   const playbackRefreshes = useRef(0)
 
-  useEffect(() => {
-    void api.fetchJson<{ items: MediaAssetView[] }>('/media-assets')
+  const loadAssets = useCallback(async () => {
+    await api.fetchJson<{ items: MediaAssetView[] }>('/media-assets')
       .then((response) => setAssets(response.items))
       .catch((reason) => setError(reason instanceof Error ? reason.message : '无法读取私人视频'))
       .finally(() => setLoading(false))
   }, [api])
+
+  useEffect(() => { void loadAssets() }, [loadAssets])
+  useEffect(() => {
+    if (!assets.some((asset) => asset.status === 'processing_playback')) return
+    const timer = window.setInterval(() => void loadAssets(), 2_500)
+    return () => window.clearInterval(timer)
+  }, [assets, loadAssets])
 
   const filtered = useMemo(() => assets.filter((asset) => asset.title.toLowerCase().includes(search.trim().toLowerCase())), [assets, search])
 

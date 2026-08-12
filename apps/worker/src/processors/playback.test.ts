@@ -20,6 +20,10 @@ const storage = new MinioStorageProvider({
   endPoint: 'localhost', port: 9000, useSSL: false,
   accessKey: 'online_learning', secretKey: 'online_learning_secret', bucket: 'echoflow-g2-worker-test',
 })
+const replacementStorage = new MinioStorageProvider({
+  endPoint: 'localhost', port: 9000, useSSL: false,
+  accessKey: 'online_learning', secretKey: 'online_learning_secret', bucket: 'echoflow-g2-worker-test',
+})
 let temporaryDirectory = ''
 let sample: Buffer
 let sampleWithoutFastStart: Buffer
@@ -181,6 +185,38 @@ describe('G2 real playback preparation', () => {
     await expect(storage.listMultipartParts(objectKey, providerUploadId)).rejects.toMatchObject({ code: 'NoSuchUpload' })
   })
 
+  it('rechecks status under the shared lock before cleaning an upload completed concurrently', async () => {
+    const user = await database.user.create({ data: { phone: '+8613900000010', displayName: 'Cleanup race' } })
+    const objectKey = `g2-worker/${crypto.randomUUID()}.mp4`
+    const providerUploadId = await storage.createMultipartUpload(objectKey, 'video/mp4')
+    const upload = await database.uploadSession.create({
+      data: {
+        ownerId: user.id, title: 'Cleanup race', originalName: 'race.mp4', contentType: 'video/mp4',
+        sizeBytes: 100n, fileFingerprint: 'e'.repeat(64), bucket: storage.bucket, objectKey,
+        providerUploadId, partSizeBytes: 5_242_880n, expiresAt: new Date(Date.now() - 1_000),
+      },
+    })
+    let signalLocked!: () => void
+    let releaseLock!: () => void
+    const locked = new Promise<void>((resolve) => { signalLocked = resolve })
+    const lockGate = new Promise<void>((resolve) => { releaseLock = resolve })
+    const completing = database.$transaction(async (transaction) => {
+      await transaction.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${upload.id}, 0))`
+      signalLocked()
+      await lockGate
+      await transaction.uploadSession.update({ where: { id: upload.id }, data: { status: 'COMPLETED', completedAt: new Date() } })
+    }, { timeout: 60_000 })
+    await locked
+    const cleaning = cleanupExpiredUploads(database, storage)
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    releaseLock()
+    await completing
+
+    await expect(cleaning).resolves.toMatchObject({ cleaned: 0, failed: 0 })
+    await expect(storage.listMultipartParts(objectKey, providerUploadId)).resolves.toEqual([])
+    await storage.abortMultipartUpload(objectKey, providerUploadId)
+  })
+
   it('reclaims a PROBING run after the previous worker lease expires', async () => {
     const { asset, run } = await createRun('5')
     await database.processingRun.update({
@@ -220,6 +256,42 @@ describe('G2 real playback preparation', () => {
     await expect(processing).resolves.toMatchObject({ skipped: true, status: 'lease_lost' })
     expect(await database.mediaAsset.findUniqueOrThrow({ where: { id: asset.id } })).toMatchObject({ status: 'PROCESSING_PLAYBACK' })
     expect(await database.outboxEvent.count({ where: { eventType: 'media.playback_ready' } })).toBe(0)
+  })
+
+  it('keeps a replacement worker playback object when a slow-start worker loses its lease', async () => {
+    const { asset, run } = await createRun('9', sampleWithoutFastStart)
+    let releaseOldUpload!: () => void
+    let signalOldUpload!: () => void
+    const oldUploadGate = new Promise<void>((resolve) => { releaseOldUpload = resolve })
+    const oldUploadStarted = new Promise<void>((resolve) => { signalOldUpload = resolve })
+    const originalUpload = storage.uploadFile.bind(storage)
+    const uploadSpy = vi.spyOn(storage, 'uploadFile').mockImplementation(async (...args) => {
+      const uploaded = await originalUpload(...args)
+      signalOldUpload()
+      await oldUploadGate
+      return uploaded
+    })
+    const oldProcessor = createPlaybackProcessor({
+      database, storage, workerId: 'old-slow-worker', ffprobePath: 'ffprobe', ffmpegPath: 'ffmpeg',
+    })
+    const oldProcessing = oldProcessor({ mediaAssetId: asset.id, processingRunId: run.id })
+    await oldUploadStarted
+    await database.processingRun.update({
+      where: { id: run.id },
+      data: { leaseExpiresAt: new Date(Date.now() - 1_000) },
+    })
+    const replacement = createPlaybackProcessor({
+      database, storage: replacementStorage, workerId: 'replacement-slow-worker', ffprobePath: 'ffprobe', ffmpegPath: 'ffmpeg',
+    })
+    await expect(replacement({ mediaAssetId: asset.id, processingRunId: run.id })).resolves.toMatchObject({ failed: false })
+    releaseOldUpload()
+    await expect(oldProcessing).resolves.toMatchObject({ skipped: true, status: 'lease_lost' })
+    uploadSpy.mockRestore()
+
+    const playback = await database.mediaObject.findFirstOrThrow({ where: { mediaAssetId: asset.id, kind: 'PLAYBACK' } })
+    expect(playback.objectKey).toContain('replacement-slow-worker')
+    await expect(replacementStorage.statObject(playback.objectKey, playback.versionId)).resolves.toMatchObject({ objectKey: playback.objectKey })
+    expect(await database.mediaAsset.findUniqueOrThrow({ where: { id: asset.id } })).toMatchObject({ status: 'PLAYABLE' })
   })
 
   it('publishes Outbox idempotently and rebuilds a lost Redis queue from PostgreSQL', async () => {

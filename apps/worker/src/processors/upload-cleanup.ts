@@ -19,23 +19,29 @@ export async function cleanupExpiredUploads(
   let failed = 0
   for (const upload of expired) {
     try {
-      if (upload.providerUploadId) {
-        try {
-          await storage.abortMultipartUpload(upload.objectKey, upload.providerUploadId)
-        } catch (error) {
-          if (!isStorageCode(error, 'NoSuchUpload')) throw error
+      const changed = await database.$transaction(async (transaction) => {
+        await transaction.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${upload.id}, 0))`
+        const current = await transaction.uploadSession.findUnique({ where: { id: upload.id } })
+        if (!current || !['CREATED', 'UPLOADING', 'VERIFYING'].includes(current.status) || current.expiresAt > now) return 0
+        if (current.providerUploadId) {
           try {
-            await storage.remove(upload.objectKey)
-          } catch (removeError) {
-            if (!isStorageCode(removeError, 'NoSuchKey')) throw removeError
+            await storage.abortMultipartUpload(current.objectKey, current.providerUploadId)
+          } catch (error) {
+            if (!isStorageCode(error, 'NoSuchUpload')) throw error
+            try {
+              await storage.remove(current.objectKey)
+            } catch (removeError) {
+              if (!isStorageCode(removeError, 'NoSuchKey')) throw removeError
+            }
           }
         }
-      }
-      const changed = await database.uploadSession.updateMany({
-        where: { id: upload.id, status: { in: ['CREATED', 'UPLOADING', 'VERIFYING'] }, expiresAt: { lte: now } },
-        data: { status: 'EXPIRED', abortedAt: now },
-      })
-      cleaned += changed.count
+        const result = await transaction.uploadSession.updateMany({
+          where: { id: current.id, status: { in: ['CREATED', 'UPLOADING', 'VERIFYING'] }, expiresAt: { lte: now } },
+          data: { status: 'EXPIRED', abortedAt: now },
+        })
+        return result.count
+      }, { maxWait: 10_000, timeout: 60_000 })
+      cleaned += changed
     } catch {
       failed += 1
     }

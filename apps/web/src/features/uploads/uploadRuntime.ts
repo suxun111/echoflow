@@ -9,13 +9,14 @@ function putPart(url: string, blob: Blob, signal: AbortSignal, onProgress: (load
   return new Promise<string>((resolve, reject) => {
     const request = new XMLHttpRequest()
     const abort = () => request.abort()
+    const cleanup = () => signal.removeEventListener('abort', abort)
     signal.addEventListener('abort', abort, { once: true })
     request.open('PUT', url)
     request.upload.onprogress = (event) => onProgress(event.loaded)
-    request.onerror = () => reject(new UploadTransportError(0, navigator.onLine ? '分片上传失败' : '网络已断开'))
-    request.onabort = () => reject(new DOMException('上传已暂停', 'AbortError'))
+    request.onerror = () => { cleanup(); reject(new UploadTransportError(0, navigator.onLine ? '分片上传失败' : '网络已断开')) }
+    request.onabort = () => { cleanup(); reject(new DOMException('上传已暂停', 'AbortError')) }
     request.onload = () => {
-      signal.removeEventListener('abort', abort)
+      cleanup()
       if (request.status < 200 || request.status >= 300) return reject(new UploadTransportError(request.status, '上传签名已失效或对象存储拒绝了分片'))
       const etag = request.getResponseHeader('etag')
       if (!etag) return reject(new UploadTransportError(request.status, '对象存储未返回 ETag，请检查 CORS 配置'))
@@ -53,7 +54,9 @@ export async function uploadMultipart(options: {
     if (!forceSingle && signedUrls.has(partNumber)) return signedUrls.get(partNumber)!
     if (forceSingle) signedUrls.delete(partNumber)
     while (!signedUrls.has(partNumber)) {
+      let initiated = false
       if (!signingPromise) {
+        initiated = true
         const batch = forceSingle
           ? [partNumber]
           : missing.filter((candidate) => !completed.has(candidate) && !signedUrls.has(candidate)).slice(0, 20)
@@ -65,7 +68,9 @@ export async function uploadMultipart(options: {
         }).finally(() => { signingPromise = null })
       }
       await signingPromise
-      if (forceSingle || !signedUrls.has(partNumber)) break
+      if (signedUrls.has(partNumber)) break
+      if (initiated) break
+      forceSingle = true
     }
     const url = signedUrls.get(partNumber)
     if (!url) throw new Error(`分片 ${partNumber} 已由其他会话完成，请刷新任务`)

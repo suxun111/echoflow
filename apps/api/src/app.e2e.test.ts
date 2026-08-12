@@ -4,10 +4,11 @@ import { UserRole } from '@online-learning/database'
 import { MinioStorageProvider } from '@online-learning/storage'
 import jwt from 'jsonwebtoken'
 import request from 'supertest'
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApplication } from './bootstrap'
 import type { RequestLog } from './common/request-context'
 import { DatabaseService } from './database/database.module'
+import { StorageService } from './storage/storage.module'
 import { createTestEnv } from './test/test-env'
 
 const env = createTestEnv()
@@ -435,15 +436,38 @@ describe('EchoFlow real PostgreSQL, auth, upload and owner boundary', () => {
       .set('authorization', `Bearer ${other.accessToken}`)
       .expect(404)
 
-    const completed = await Promise.all([
-      request(app.getHttpServer()).post(`/api/v1/uploads/${created.body.id}/complete`).set('authorization', `Bearer ${owner.accessToken}`),
-      request(app.getHttpServer()).post(`/api/v1/uploads/${created.body.id}/complete`).set('authorization', `Bearer ${owner.accessToken}`),
-    ])
+    const apiStorage = app.get(StorageService)
+    const originalComplete = apiStorage.completeMultipartUpload.bind(apiStorage)
+    let signalObjectCompleted!: () => void
+    let releaseComplete!: () => void
+    const objectCompleted = new Promise<void>((resolve) => { signalObjectCompleted = resolve })
+    const completeGate = new Promise<void>((resolve) => { releaseComplete = resolve })
+    const completeSpy = vi.spyOn(apiStorage, 'completeMultipartUpload').mockImplementation(async (...args) => {
+      const result = await originalComplete(...args)
+      signalObjectCompleted()
+      await completeGate
+      return result
+    })
+    const completeRequests = [
+      request(app.getHttpServer()).post(`/api/v1/uploads/${created.body.id}/complete`).set('authorization', `Bearer ${owner.accessToken}`).then((response) => response),
+      request(app.getHttpServer()).post(`/api/v1/uploads/${created.body.id}/complete`).set('authorization', `Bearer ${owner.accessToken}`).then((response) => response),
+    ]
+    await objectCompleted
+    const cancelRequest = request(app.getHttpServer()).post(`/api/v1/uploads/${created.body.id}/cancel`)
+      .set('authorization', `Bearer ${owner.accessToken}`).then((response) => response)
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    releaseComplete()
+    const completed = await Promise.all(completeRequests)
+    const cancelled = await cancelRequest
+    completeSpy.mockRestore()
     expect(completed.map((response) => response.status)).toEqual([201, 201])
+    expect(cancelled.status).toBe(409)
     expect(completed[0].body.mediaAssetId).toBe(completed[1].body.mediaAssetId)
     expect(await database.mediaAsset.count()).toBe(1)
     expect(await database.mediaObject.count()).toBe(1)
-    expect((await database.mediaObject.findFirstOrThrow()).versionId).toBeTruthy()
+    const originalObject = await database.mediaObject.findFirstOrThrow()
+    expect(originalObject.versionId).toBeTruthy()
+    await expect(apiStorage.statObject(originalObject.objectKey, originalObject.versionId)).resolves.toMatchObject({ sizeBytes: bytes.length })
     expect(await database.processingRun.count()).toBe(1)
     expect(await database.outboxEvent.count({ where: { eventType: 'media.upload_verified' } })).toBe(1)
 

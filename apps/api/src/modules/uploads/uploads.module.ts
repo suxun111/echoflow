@@ -88,22 +88,27 @@ export class UploadsService {
   }
 
   private async expireUpload(upload: UploadWithParts) {
-    if (upload.providerUploadId) {
-      try {
-        await this.storage.abortMultipartUpload(upload.objectKey, upload.providerUploadId)
-      } catch (error) {
-        if (!isStorageCode(error, 'NoSuchUpload')) throw new ApiException(503, 'storage_unavailable', '暂时无法清理过期上传')
+    await this.database.$transaction(async (transaction) => {
+      await transaction.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${upload.id}, 0))`
+      const current = await transaction.uploadSession.findFirst({ where: { id: upload.id }, include: this.include() })
+      if (!current || !ACTIVE_UPLOAD_STATUSES.includes(current.status) || current.expiresAt.getTime() > Date.now()) return
+      if (current.providerUploadId) {
         try {
-          await this.storage.remove(upload.objectKey)
-        } catch (removeError) {
-          if (!isStorageCode(removeError, 'NoSuchKey')) throw new ApiException(503, 'storage_unavailable', '暂时无法清理过期对象')
+          await this.storage.abortMultipartUpload(current.objectKey, current.providerUploadId)
+        } catch (error) {
+          if (!isStorageCode(error, 'NoSuchUpload')) throw new ApiException(503, 'storage_unavailable', '暂时无法清理过期上传')
+          try {
+            await this.storage.remove(current.objectKey)
+          } catch (removeError) {
+            if (!isStorageCode(removeError, 'NoSuchKey')) throw new ApiException(503, 'storage_unavailable', '暂时无法清理过期对象')
+          }
         }
       }
-    }
-    await this.database.uploadSession.updateMany({
-      where: { id: upload.id, status: { in: ACTIVE_UPLOAD_STATUSES } },
-      data: { status: UploadStatus.EXPIRED, abortedAt: new Date() },
-    })
+      await transaction.uploadSession.updateMany({
+        where: { id: current.id, status: { in: ACTIVE_UPLOAD_STATUSES } },
+        data: { status: UploadStatus.EXPIRED, abortedAt: new Date() },
+      })
+    }, { maxWait: 10_000, timeout: 60_000 })
   }
 
   private async ensureActive(upload: UploadWithParts) {
@@ -343,7 +348,7 @@ export class UploadsService {
     const initial = await this.findOwned(uploadId, ownerId)
     if (initial.status !== UploadStatus.COMPLETED) await this.ensureActive(initial)
     return this.database.$transaction(async (transaction) => {
-      await transaction.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${uploadId}))`
+      await transaction.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${uploadId}, 0))`
       let upload = await transaction.uploadSession.findFirst({
         where: { id: uploadId, ownerId }, include: this.include(),
       })
@@ -351,7 +356,9 @@ export class UploadsService {
       if (upload.status === UploadStatus.COMPLETED && upload.mediaAsset) {
         return { upload: this.toView(upload), mediaAssetId: upload.mediaAsset.id }
       }
-      await this.ensureActive(upload)
+      if (upload.expiresAt.getTime() <= Date.now()) throw new ApiException(410, 'upload_expired', '上传任务已过期')
+      if (!ACTIVE_UPLOAD_STATUSES.includes(upload.status)) throw new ApiException(409, 'conflict', '上传任务已经结束')
+      if (!upload.providerUploadId) throw new ApiException(503, 'storage_unavailable', '对象存储上传尚未准备好')
 
       let providerParts: MultipartPart[] | null = null
       let completed: { etag: string; versionId: string | null } | null = null
@@ -431,24 +438,34 @@ export class UploadsService {
   }
 
   async cancel(ownerId: string, uploadId: string) {
-    const upload = await this.findOwned(uploadId, ownerId)
-    if (upload.status === UploadStatus.CANCELLED) return { cancelled: true }
-    if (ACTIVE_UPLOAD_STATUSES.includes(upload.status) && upload.expiresAt.getTime() <= Date.now()) {
-      await this.expireUpload(upload)
-      throw new ApiException(410, 'upload_expired', '上传任务已过期')
-    }
-    if (!ACTIVE_UPLOAD_STATUSES.includes(upload.status)) throw new ApiException(409, 'conflict', '已完成的上传不能取消')
-    if (upload.providerUploadId) {
-      try {
-        await this.storage.abortMultipartUpload(upload.objectKey, upload.providerUploadId)
-      } catch (error) {
-        if (!isStorageCode(error, 'NoSuchUpload')) throw new ApiException(503, 'storage_unavailable', '对象存储暂时无法取消上传')
+    const result = await this.database.$transaction(async (transaction) => {
+      await transaction.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${uploadId}, 0))`
+      const upload = await transaction.uploadSession.findFirst({
+        where: { id: uploadId, ownerId }, include: this.include(),
+      })
+      if (!upload) throw new ApiException(404, 'not_found', '上传任务不存在')
+      if (upload.status === UploadStatus.CANCELLED) return { cancelled: true, expired: false }
+      if (!ACTIVE_UPLOAD_STATUSES.includes(upload.status)) throw new ApiException(409, 'conflict', '已完成的上传不能取消')
+      if (upload.providerUploadId) {
+        try {
+          await this.storage.abortMultipartUpload(upload.objectKey, upload.providerUploadId)
+        } catch (error) {
+          if (!isStorageCode(error, 'NoSuchUpload')) throw new ApiException(503, 'storage_unavailable', '对象存储暂时无法取消上传')
+          try {
+            await this.storage.remove(upload.objectKey)
+          } catch (removeError) {
+            if (!isStorageCode(removeError, 'NoSuchKey')) throw new ApiException(503, 'storage_unavailable', '对象存储暂时无法清理上传')
+          }
+        }
       }
-    }
-    await this.database.uploadSession.updateMany({
-      where: { id: upload.id, status: { in: ACTIVE_UPLOAD_STATUSES } },
-      data: { status: UploadStatus.CANCELLED, abortedAt: new Date() },
-    })
+      const expired = upload.expiresAt.getTime() <= Date.now()
+      await transaction.uploadSession.update({
+        where: { id: upload.id },
+        data: { status: expired ? UploadStatus.EXPIRED : UploadStatus.CANCELLED, abortedAt: new Date() },
+      })
+      return { cancelled: !expired, expired }
+    }, { maxWait: 10_000, timeout: 60_000 })
+    if (result.expired) throw new ApiException(410, 'upload_expired', '上传任务已过期')
     return { cancelled: true }
   }
 }

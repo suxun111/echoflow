@@ -207,17 +207,11 @@ export function createPlaybackProcessor(options: PlaybackProcessorOptions) {
       await options.storage.downloadFile(object.objectKey, inputPath, object.versionId)
       const result = await probe(options.ffprobePath, inputPath)
       if (!result.fastStart) {
-        const playbackKey = `owners/${asset.ownerId}/playback/${asset.id}.mp4`
-        try {
-          playbackObject = await options.storage.statObject(playbackKey)
-        } catch (error) {
-          const code = typeof error === 'object' && error !== null && 'code' in error ? (error as { code?: string }).code : undefined
-          if (code !== 'NoSuchKey' && code !== 'NotFound') throw error
-          const outputPath = join(workDirectory, `${asset.id}.mp4`)
-          await remuxFastStart(options.ffmpegPath ?? 'ffmpeg', inputPath, outputPath)
-          playbackObject = await options.storage.uploadFile(playbackKey, outputPath, 'video/mp4')
-          playbackCreated = true
-        }
+        const playbackKey = `owners/${asset.ownerId}/playback/${asset.id}/${job.processingRunId}-${options.workerId}.mp4`
+        const outputPath = join(workDirectory, `${asset.id}.mp4`)
+        await remuxFastStart(options.ffmpegPath ?? 'ffmpeg', inputPath, outputPath)
+        playbackObject = await options.storage.uploadFile(playbackKey, outputPath, 'video/mp4')
+        playbackCreated = true
       }
       await options.database.$transaction(async (transaction) => {
         const finalized = await transaction.processingRun.updateMany({
