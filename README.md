@@ -18,9 +18,9 @@ EchoFlow V1 是一个私人英语长视频影子学习工具。目标链路是�
 - V1 产品代码审计源点：`42968ad`；G0 文档基线：`d01c67e`；
 - 当前 Goal：`v0.5.0-alpha.1`；
 - G0 成果保护、唯一主线与外部恢复闭环已经完成；
-- 当前 Gate：G1 契约、数据库、身份和安全；任务合同已冻结，首轮实现处于整改与复核阶段；
+- G1 契约、数据库、身份和安全已通过；最终代码验证锚点为 `4bfaaba`；
 - 外部私有仓库：`https://github.com/suxun111/echoflow.git`；
-- 产品功能开发仅允许 G1 合同范围；G2–G5 继续冻结；
+- 下一 Gate 是 G2 长视频上传与可播放资产，任务合同确认前 G2–G5 继续冻结；
 - recovery、hardening、daily-goal 分支不得整体盲合。
 
 开始开发或审查前依次阅读：
@@ -28,7 +28,8 @@ EchoFlow V1 是一个私人英语长视频影子学习工具。目标链路是�
 1. [当前执行状态](docs/EXECUTION-STATE.md)
 2. [v0.5.0-alpha.1 Goal](docs/GOAL-v0.5.0-alpha.1.md)
 3. [EchoFlow V1 PRD](docs/EchoFlow-V1-PRD.md)
-4. [G0 分支资产台账](docs/G0-BRANCH-ASSET-INVENTORY.md)
+4. [G1 验证证据](docs/G1-VERIFICATION-EVIDENCE.md)
+5. [G0 分支资产台账](docs/G0-BRANCH-ASSET-INVENTORY.md)
 
 ## 工作区
 
@@ -69,6 +70,7 @@ pnpm --filter @online-learning/worker dev
 - [V1 PRD](docs/EchoFlow-V1-PRD.md)
 - [Goal](docs/GOAL-v0.5.0-alpha.1.md)
 - [Execution State](docs/EXECUTION-STATE.md)
+- [G1 验证证据](docs/G1-VERIFICATION-EVIDENCE.md)
 - [G0 分支资产台账](docs/G0-BRANCH-ASSET-INVENTORY.md)
 - [架构说明](docs/ARCHITECTURE.md)
 - [API 契约](docs/API.md)

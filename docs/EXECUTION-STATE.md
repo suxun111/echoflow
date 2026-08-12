@@ -1,6 +1,6 @@
 # EchoFlow Execution State
 
-更新时间：2026-08-11
+更新时间：2026-08-12
 
 此文件记录动态执行状态，不重复存放完整 PRD。长期产品决定见 [EchoFlow V1 PRD](EchoFlow-V1-PRD.md)，整体终点见 [v0.5.0-alpha.1 Goal](GOAL-v0.5.0-alpha.1.md)。
 
@@ -9,16 +9,16 @@
 | 字段 | 当前值 |
 |---|---|
 | Goal | `v0.5.0-alpha.1` |
-| Gate | `G1 契约、数据库、身份和安全` |
+| Gate | `G1 契约、数据库、身份和安全` 已关闭；`G2` 未开始 |
 | 唯一 trunk | `master` |
 | V1 产品代码审计源点 | `42968ad` |
 | G0 文档基线 | `d01c67e`，已 fast-forward 至 master |
 | fresh-clone 修复 | `0e3c912`，已 fast-forward 至 master；来源分支为 `codex/g0-fresh-clone-topology-20260811` |
-| G1 实施分支 | `codex/g1-contract-database-auth-20260812`，基于 `master@9fadacc` |
-| WIP | G1 任务合同冻结，开始 contracts/database/auth 纵向闭环 |
-| 产品功能开发 | 仅允许 G1 合同范围；G2–G5 冻结 |
+| G1 实施分支 | `codex/g1-contract-database-auth-20260812`；最终代码锚点 `4bfaaba` |
+| WIP | 无核心纵向闭环在集成；等待确认 G2 任务合同 |
+| 产品功能开发 | G1 已关闭；G2–G5 在新任务合同确认前冻结 |
 | Remote | `origin = https://github.com/suxun111/echoflow.git`；Private；外部恢复验证通过 |
-| 下一人工边界 | G1 验证与 Reviewer 通过后判断是否进入 G2 |
+| 下一人工边界 | 复盘并确认 G2“长视频上传与可播放资产”任务合同 |
 
 ## 2026-08-11 决策澄清
 
@@ -92,8 +92,20 @@
 
 ## 当前进行中
 
-- 按 [G1 任务合同](G1-TASK-CONTRACT.md) 实施 `/api/v1` contracts、V1 PostgreSQL baseline、OTP/Access/Refresh、owner/RBAC 和真实集成门禁；
-- 在 G1 通过前不开始 Multipart 上传和 G2。
+- G1 已按 [验证证据](G1-VERIFICATION-EVIDENCE.md) 关闭；
+- G2 尚未建立任务合同，不开始 Multipart、对象签名或可播放资产实现。
+
+## G1 关闭证据
+
+- 冻结合同 `cad0c0b`，第一版实现 `9106ba3` 因 Reviewer 的 5 个 P1 被否决；
+- 安全与数据约束整改 `7a9048c` 通过第二轮独立审核；
+- fresh clone 暴露 Prisma Client 生成缺口，修复为 `f568eea` 后通过第三轮独立审核；
+- 最终又收窄测试库删除边界并补充 403/429 断言，`4bfaaba` 通过独立增量审核；
+- 最终代码 `4bfaaba` 无已知 P0/P1；
+- fresh clone 冻结安装、首次 lint、58 个测试和四应用 build 通过；
+- 独立 `echoflow_g1_fresh_f568eea_test` 从空库迁移成功，第二次 deploy 无待迁移；
+- API 真实 PostgreSQL 测试覆盖重启、并发 Refresh 重放、伪 Token、双用户 owner、RBAC 和复合数据库约束；
+- 历史 `online_learning` 保持原 13 张表和 2 条旧 migration，并被配置/迁移入口显式保护。
 
 ## G0 退出条件（已全部完成）
 

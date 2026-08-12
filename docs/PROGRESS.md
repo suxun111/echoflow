@@ -1,6 +1,6 @@
 # EchoFlow 项目进度
 
-更新时间：2026-08-11
+更新时间：2026-08-12
 
 动态任务状态以 [Execution State](EXECUTION-STATE.md) 为准，产品目标以 [V1 PRD](EchoFlow-V1-PRD.md) 为准。
 
@@ -16,13 +16,12 @@ EchoFlow 已具备：
 EchoFlow 尚不具备：
 
 - master 上真实的个人长视频上传闭环；
-- PostgreSQL 业务事实源；
-- 可公开使用的认证和 owner 权限；
+- G2 的长视频上传、对象存储和可播放 MediaAsset；
 - 可恢复的 Outbox/Worker/MOSS 完整流水线；
 - 真实媒体、完整字幕、逐句练习和进度恢复纵向链路；
 - CI、生产发布和真实基础设施恢复闭环。
 
-因此当前可以用于原型展示和本地工程审查，不能承载真实用户私人数据或公开部署。
+G1 已建立真实 PostgreSQL/Auth/owner 基线，但上传、MOSS、学习端接线和生产运维尚未闭环，因此仍不能承载真实用户私人视频或公开部署。
 
 ## 当前 Git 基线
 
@@ -79,3 +78,17 @@ G1 契约、数据库、身份和安全
 ```
 
 上一 Gate 没有证据通过时，不开始下一 Gate。
+
+## G1 已完成
+
+- `/api/v1` contracts、统一错误、requestId、CORS allowlist 和安全环境校验已建立；
+- V1 baseline migration 已在空 PostgreSQL 应用并验证幂等；
+- OTP、短期 Access JWT、opaque rotating HttpOnly Refresh Session 已进入真实数据库；
+- 并发 Refresh 重放会撤销整个 family；
+- owner/RBAC 默认拒绝，数据库复合外键阻止跨 owner/跨聚合关系；
+- PRD、contracts、Prisma 和 migration 的状态机已经统一；
+- 最终代码锚点 `4bfaaba` 通过独立 Reviewer，无 P0/P1；
+- fresh clone 冻结安装、lint、58 个测试、Web/Admin/API/Worker build 全部通过；
+- 完整证据见 [G1 验证证据](G1-VERIFICATION-EVIDENCE.md)。
+
+下一步是先冻结 G2 任务合同，不直接沿用旧上传原型。
