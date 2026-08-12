@@ -5,6 +5,7 @@ import jwt from 'jsonwebtoken'
 import request from 'supertest'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { createApplication } from './bootstrap'
+import type { RequestLog } from './common/request-context'
 import { DatabaseService } from './database/database.module'
 import { createTestEnv } from './test/test-env'
 
@@ -21,9 +22,10 @@ type LoginResult = {
 describe('G1 real PostgreSQL auth and owner boundary', () => {
   let app: INestApplication
   let database: DatabaseService
+  const requestLogs: RequestLog[] = []
 
   async function startApp() {
-    app = await createApplication(env)
+    app = await createApplication(env, { writeRequestLog: (entry) => requestLogs.push(entry) })
     database = app.get(DatabaseService)
   }
 
@@ -66,7 +68,10 @@ describe('G1 real PostgreSQL auth and owner boundary', () => {
   }
 
   beforeAll(startApp)
-  beforeEach(cleanDatabase)
+  beforeEach(async () => {
+    requestLogs.length = 0
+    await cleanDatabase()
+  })
   afterAll(async () => {
     if (app) await app.close()
   })
@@ -79,6 +84,10 @@ describe('G1 real PostgreSQL auth and owner boundary', () => {
       .expect(200)
     expect(health.headers['x-request-id']).toBe('g1-health-request')
     expect(health.headers['access-control-allow-origin']).toBe('http://localhost:4173')
+    expect(requestLogs).toContainEqual(expect.objectContaining({
+      type: 'http_request', requestId: 'g1-health-request', method: 'GET', path: '/api/v1/health', status: 200,
+    }))
+    expect(Object.keys(requestLogs[0]).sort()).toEqual(['durationMs', 'method', 'path', 'requestId', 'status', 'type'])
     await request(app.getHttpServer()).get('/api/v1/health/ready').expect(200)
 
     const deniedOrigin = await request(app.getHttpServer())
@@ -102,6 +111,14 @@ describe('G1 real PostgreSQL auth and owner boundary', () => {
 
     const privateResponse = await request(app.getHttpServer()).get('/api/v1/users/me').expect(401)
     expect(privateResponse.body).toMatchObject({ code: 'unauthenticated' })
+
+    const session = await login('+8613800000011')
+    const malformedId = await request(app.getHttpServer())
+      .get('/api/v1/lessons/not-a-uuid')
+      .set('authorization', `Bearer ${session.accessToken}`)
+      .expect(400)
+    expect(malformedId.body).toMatchObject({ code: 'invalid_request' })
+    expect(malformedId.body.requestId).toBeTruthy()
   })
 
   it('persists OTP/session state and rotates an HttpOnly refresh cookie after app restart', async () => {
@@ -168,6 +185,25 @@ describe('G1 real PostgreSQL auth and owner boundary', () => {
     expect(replay.body.message).toContain('重放')
     await request(app.getHttpServer()).post('/api/v1/auth/refresh').set('cookie', nextCookie).expect(401)
     await request(app.getHttpServer()).get('/api/v1/users/me').set('authorization', `Bearer ${rotated.body.accessToken}`).expect(401)
+  })
+
+  it('treats concurrent use of one refresh token as replay and revokes the winner', async () => {
+    const session = await login('+8613800000012')
+    const responses = await Promise.all([
+      request(app.getHttpServer()).post('/api/v1/auth/refresh').set('cookie', session.cookie),
+      request(app.getHttpServer()).post('/api/v1/auth/refresh').set('cookie', session.cookie),
+    ])
+    expect(responses.map((response) => response.status).sort()).toEqual([200, 401])
+
+    const winner = responses.find((response) => response.status === 200)!
+    const replay = responses.find((response) => response.status === 401)!
+    expect(replay.body).toMatchObject({ code: 'unauthenticated' })
+    expect(replay.body.message).toContain('重放')
+    expect(replay.body.requestId).toBeTruthy()
+
+    const winnerCookie = String(winner.headers['set-cookie'][0]).split(';')[0]
+    await request(app.getHttpServer()).post('/api/v1/auth/refresh').set('cookie', winnerCookie).expect(401)
+    await request(app.getHttpServer()).get('/api/v1/users/me').set('authorization', `Bearer ${winner.body.accessToken}`).expect(401)
   })
 
   it('rejects tampered, wrongly signed, wrongly scoped and expired access tokens', async () => {
@@ -244,5 +280,92 @@ describe('G1 real PostgreSQL auth and owner boundary', () => {
       .get(`/api/v1/lessons/${lesson.id}`)
       .set('authorization', `Bearer ${learner.accessToken}`)
       .expect(404)
+  })
+
+  it('rejects cross-owner and cross-aggregate relations at the PostgreSQL boundary', async () => {
+    const owner = await login('+8613800000013')
+    const other = await login('+8613800000014')
+    const upload = await database.uploadSession.create({
+      data: {
+        ownerId: owner.user.id,
+        originalName: 'podcast.mp4',
+        contentType: 'video/mp4',
+        sizeBytes: 1024n,
+        objectKey: `owners/${owner.user.id}/upload.mp4`,
+        partSizeBytes: 512n,
+        expiresAt: new Date(Date.now() + 60_000),
+      },
+    })
+    await expect(database.mediaAsset.create({
+      data: { ownerId: other.user.id, uploadSessionId: upload.id, title: 'Cross owner', originalName: 'podcast.mp4' },
+    })).rejects.toMatchObject({ code: 'P2003' })
+
+    const firstAsset = await database.mediaAsset.create({
+      data: { ownerId: owner.user.id, title: 'First', originalName: 'first.mp4' },
+    })
+    const secondAsset = await database.mediaAsset.create({
+      data: { ownerId: owner.user.id, title: 'Second', originalName: 'second.mp4' },
+    })
+    await expect(database.processingRun.create({
+      data: { ownerId: other.user.id, mediaAssetId: firstAsset.id, pipelineVersion: 'g1-test' },
+    })).rejects.toMatchObject({ code: 'P2003' })
+
+    const firstTranscript = await database.transcriptVersion.create({
+      data: { mediaAssetId: firstAsset.id, version: 1, durationMs: 1_000 },
+    })
+    const secondTranscript = await database.transcriptVersion.create({
+      data: { mediaAssetId: secondAsset.id, version: 1, durationMs: 1_000 },
+    })
+    await database.transcriptVersion.update({ where: { id: firstTranscript.id }, data: { status: 'ACTIVE' } })
+    await expect(database.transcriptVersion.create({
+      data: { mediaAssetId: firstAsset.id, version: 2, durationMs: 1_000, status: 'ACTIVE' },
+    })).rejects.toMatchObject({ code: 'P2002' })
+    await expect(database.privateLesson.create({
+      data: {
+        ownerId: owner.user.id,
+        mediaAssetId: firstAsset.id,
+        transcriptVersionId: secondTranscript.id,
+        title: 'Cross transcript',
+      },
+    })).rejects.toMatchObject({ code: 'P2003' })
+
+    const firstLesson = await database.privateLesson.create({
+      data: {
+        ownerId: owner.user.id,
+        mediaAssetId: firstAsset.id,
+        transcriptVersionId: firstTranscript.id,
+        title: 'First',
+      },
+    })
+    const secondLesson = await database.privateLesson.create({
+      data: {
+        ownerId: owner.user.id,
+        mediaAssetId: secondAsset.id,
+        transcriptVersionId: secondTranscript.id,
+        title: 'Second',
+      },
+    })
+    const secondUnit = await database.learningUnit.create({
+      data: { lessonId: secondLesson.id, order: 0, startMs: 0, endMs: 1_000, firstCueOrder: 0, lastCueOrder: 0 },
+    })
+    const secondCue = await database.subtitleCue.create({
+      data: { transcriptVersionId: secondTranscript.id, order: 0, startMs: 0, endMs: 1_000, text: 'Second', words: [] },
+    })
+
+    await expect(database.learningProgress.create({
+      data: { ownerId: other.user.id, lessonId: firstLesson.id, completedCueIds: [] },
+    })).rejects.toMatchObject({ code: 'P2003' })
+    await expect(database.learningProgress.create({
+      data: { ownerId: owner.user.id, lessonId: firstLesson.id, currentUnitId: secondUnit.id, completedCueIds: [] },
+    })).rejects.toMatchObject({ code: 'P2003' })
+    await expect(database.learningProgress.create({
+      data: {
+        ownerId: owner.user.id,
+        lessonId: firstLesson.id,
+        currentTranscriptVersionId: firstTranscript.id,
+        currentCueId: secondCue.id,
+        completedCueIds: [],
+      },
+    })).rejects.toMatchObject({ code: 'P2003' })
   })
 })

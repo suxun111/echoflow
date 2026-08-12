@@ -31,6 +31,20 @@
 - 不把视频二进制、Refresh 明文、OTP 明文或字幕正文写进日志；
 - 不在本任务中把 baseline 应用于现有 `online_learning` 旧原型库，只对名称以 `_test` 结尾的独立测试库执行。
 
+冻结状态语义与 PRD 一致：
+
+```text
+UploadSession:     CREATED → UPLOADING → VERIFYING → COMPLETED
+MediaAsset:        PROCESSING_PLAYBACK → PLAYABLE
+ProcessingRun:     QUEUED → PROCESSING → VALIDATING → SUCCEEDED/FAILED/CANCELLED
+ProcessingStage:   UPLOAD_VERIFIED → PROBING → PLAYBACK_READY → AUDIO_EXTRACTING → CHUNKING
+                   → TRANSCRIBING → MERGING → CUE_SEGMENTING → VALIDATING
+                   → TRANSCRIPT_READY → COURSE_READY
+TranscriptVersion: BUILDING → ACTIVE → SUPERSEDED/REJECTED
+```
+
+失败、过期和删除状态只补充生命周期终态，不替换以上主路径。一个 MediaAsset 同时最多一个 `ACTIVE` TranscriptVersion。
+
 ### 身份和权限纵向闭环
 
 - `POST /api/v1/auth/otp/request`：生成随机六位 OTP，数据库持久化 HMAC，5 分钟过期、请求节流；仅 test/development 且显式允许时返回测试码；

@@ -1,5 +1,5 @@
 import { Controller, Get, Inject, Injectable, Module, Param } from '@nestjs/common'
-import { PrivateLessonSchema } from '@online-learning/contracts'
+import { IdSchema, PrivateLessonSchema } from '@online-learning/contracts'
 import { ApiException } from '../../common/api-exception'
 import { CurrentUser } from '../../common/auth.decorators'
 import { DatabaseService } from '../../database/database.module'
@@ -30,7 +30,7 @@ export class LessonsController {
 
   @Get(':lessonId')
   get(@Param('lessonId') lessonId: string, @CurrentUser() user: AuthenticatedUser) {
-    return this.lessons.getOwned(lessonId, user.id)
+    return this.lessons.getOwned(IdSchema.parse(lessonId), user.id)
   }
 }
 

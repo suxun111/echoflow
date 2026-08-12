@@ -18,11 +18,8 @@ async function main() {
 
   try {
     await admin.connect()
-    const existing = await admin.query<{ exists: boolean }>(
-      'SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname = $1) AS exists',
-      [databaseName],
-    )
-    if (!existing.rows[0]?.exists) await admin.query(`CREATE DATABASE "${databaseName}"`)
+    await admin.query(`DROP DATABASE IF EXISTS "${databaseName}" WITH (FORCE)`)
+    await admin.query(`CREATE DATABASE "${databaseName}"`)
   } finally {
     await admin.end()
   }

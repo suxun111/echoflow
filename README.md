@@ -18,9 +18,9 @@ EchoFlow V1 是一个私人英语长视频影子学习工具。目标链路是�
 - V1 产品代码审计源点：`42968ad`；G0 文档基线：`d01c67e`；
 - 当前 Goal：`v0.5.0-alpha.1`；
 - G0 成果保护、唯一主线与外部恢复闭环已经完成；
-- 下一 Gate：G1 契约、数据库、身份和安全，等待用户确认启动；
+- 当前 Gate：G1 契约、数据库、身份和安全；任务合同已冻结，首轮实现处于整改与复核阶段；
 - 外部私有仓库：`https://github.com/suxun111/echoflow.git`；
-- 产品功能开发冻结至 G1 任务合同确认；
+- 产品功能开发仅允许 G1 合同范围；G2–G5 继续冻结；
 - recovery、hardening、daily-goal 分支不得整体盲合。
 
 开始开发或审查前依次阅读：
@@ -34,13 +34,13 @@ EchoFlow V1 是一个私人英语长视频影子学习工具。目标链路是�
 
 - `apps/web`：React + Vite 学习端；当前含课程库、练习、录音和上传原型，V1 将收敛到“我的视频”。
 - `apps/admin`：React + Vite 管理端骨架；V1 只保留内部任务支持能力。
-- `apps/api`：NestJS API，提供健康检查、认证、课程、字幕、进度、上传、任务与管理端接口。
+- `apps/api`：NestJS API；当前生产入口只挂载 `/api/v1` 健康检查、OTP/Access/Refresh、`users/me`、owner Lesson 和最小审计接口，旧原型模块不挂载。
 - `apps/worker`：BullMQ 媒体处理 Worker 骨架，模拟转码、转写、翻译、分句、发布流程。
 - `packages/contracts`：Zod 契约和跨端共享类型。
 - `packages/config`：服务端环境变量解析。
 - `packages/ui`：共享 UI token 与基础组件。
-- `packages/storage`：内存存储与 MinIO 存储适配。
-- `packages/database`：Prisma schema、测试与种子数据。
+- `packages/storage`：存储适配骨架；G2 才接通真实 Multipart 与签名播放。
+- `packages/database`：V1 Prisma baseline、migration 与独立 `_test` 数据库门禁。
 
 ## 常用命令
 
@@ -51,6 +51,7 @@ pnpm lint
 pnpm test
 pnpm build
 pnpm infra:up
+pnpm db:migrate:deploy
 pnpm --filter @online-learning/web dev
 pnpm --filter @online-learning/admin dev
 pnpm --filter @online-learning/api dev
@@ -61,7 +62,7 @@ pnpm --filter @online-learning/worker dev
 
 ## 本地环境
 
-复制 `.env.example` 为 `.env` 后按需调整。`pnpm infra:up` 会启动 Postgres、Redis 和 MinIO，配置与 `.env.example` 保持一致。
+复制 `.env.example` 为 `.env` 后按需调整。`pnpm infra:up` 会在新数据卷中创建独立 `echoflow` 数据库，并启动 Redis 和 MinIO。历史原型库 `online_learning` 受迁移脚本显式保护；`db:migrate` 和 `db:migrate:deploy` 若检测到该库会直接拒绝执行。
 
 更多说明见：
 

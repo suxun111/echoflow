@@ -24,7 +24,16 @@ type Next = (error?: unknown) => void
 
 const RequestIdPattern = /^[A-Za-z0-9._:-]{8,128}$/
 
-export function installRequestContext(app: INestApplication, logRequests: boolean) {
+export type RequestLog = {
+  type: 'http_request'
+  requestId: string
+  method: string
+  path: string
+  status: number
+  durationMs: number
+}
+
+export function installRequestContext(app: INestApplication, writeLog: (entry: RequestLog) => void) {
   app.use((request: RequestContext, response: ResponseContext, next: Next) => {
     const incoming = request.headers['x-request-id']
     const candidate = Array.isArray(incoming) ? incoming[0] : incoming
@@ -33,15 +42,13 @@ export function installRequestContext(app: INestApplication, logRequests: boolea
     request.requestId = requestId
     response.setHeader('x-request-id', requestId)
 
-    if (logRequests) {
-      response.on('finish', () => {
-        const path = request.path ?? request.originalUrl?.split('?')[0] ?? 'unknown'
-        console.log(JSON.stringify({
-          type: 'http_request', requestId, method: request.method, path,
-          status: response.statusCode, durationMs: Math.round(performance.now() - startedAt),
-        }))
+    response.on('finish', () => {
+      const path = request.path ?? request.originalUrl?.split('?')[0] ?? 'unknown'
+      writeLog({
+        type: 'http_request', requestId, method: request.method, path,
+        status: response.statusCode, durationMs: Math.round(performance.now() - startedAt),
       })
-    }
+    })
     next()
   })
 }

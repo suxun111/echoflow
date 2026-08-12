@@ -3,9 +3,13 @@ import { NestFactory } from '@nestjs/core'
 import type { ServerEnv } from '@online-learning/config'
 import { AppModule } from './app.module'
 import { ApiExceptionFilter } from './common/api-exception.filter'
-import { installRequestContext } from './common/request-context'
+import { installRequestContext, type RequestLog } from './common/request-context'
 
-export async function createApplication(env: ServerEnv): Promise<INestApplication> {
+type ApplicationOptions = {
+  writeRequestLog?: (entry: RequestLog) => void
+}
+
+export async function createApplication(env: ServerEnv, options: ApplicationOptions = {}): Promise<INestApplication> {
   const app = await NestFactory.create(AppModule.register(env), {
     abortOnError: false,
     logger: env.NODE_ENV === 'test' ? false : ['error', 'warn', 'log'],
@@ -17,7 +21,7 @@ export async function createApplication(env: ServerEnv): Promise<INestApplicatio
       callback(null, !origin || env.CORS_ALLOWED_ORIGINS.includes(origin))
     },
   })
-  installRequestContext(app, env.NODE_ENV !== 'test')
+  installRequestContext(app, options.writeRequestLog ?? ((entry) => console.log(JSON.stringify(entry))))
   app.useGlobalFilters(new ApiExceptionFilter())
   await app.init()
   return app

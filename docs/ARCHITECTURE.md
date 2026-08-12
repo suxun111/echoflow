@@ -1,8 +1,8 @@
 # EchoFlow 架构说明
 
-> 状态说明：本文主要描述产品代码审计源点 `42968ad` 的工程骨架，不代表 V1 目标已经实现。目标架构和已确认边界见 [EchoFlow V1 PRD](EchoFlow-V1-PRD.md)，当前执行状态见 [Execution State](EXECUTION-STATE.md)。
+> 状态说明：本文区分 G1 已接通的身份/数据库基线和仍未接通的 G2–G5 能力。目标架构和已确认边界见 [EchoFlow V1 PRD](EchoFlow-V1-PRD.md)，动态进度见 [Execution State](EXECUTION-STATE.md)。
 
-更新时间：2026-07-18
+更新时间：2026-08-12
 
 ## 总览
 
@@ -31,14 +31,15 @@ flowchart LR
 
 ## 后端
 
-`apps/api` 使用 NestJS 模块拆分业务边界：
+`apps/api` 的 G1 生产入口使用 `/api/v1`，当前只挂载：
 
-- `auth`：开发验证码登录。
-- `videos` / `lessons`：课程列表与课程详情。
-- `subtitles`：字幕读取与单句更新。
-- `progress`：学习进度读取与更新。
-- `uploads` / `jobs`：私有上传预签名与处理任务。
-- `admin`：候选内容、授权审核和发布操作。
+- `health`：存活与 PostgreSQL readiness；
+- `auth`：随机 OTP 的可替换发送端口、短期 Access JWT、opaque rotating Refresh Session；
+- `users`：当前用户；
+- `lessons`：数据库 owner 条件下的私人 Lesson 最小读取；
+- `admin`：RBAC 保护的最小审计列表。
+
+旧 `videos/subtitles/progress/uploads/jobs` 原型源码尚待所属 Gate 清理，但没有被 `AppModule` 挂载，不能作为当前能力使用。
 
 ## 异步处理
 
@@ -46,7 +47,7 @@ flowchart LR
 
 ## 数据与存储
 
-`packages/database` 定义 PostgreSQL Prisma schema，覆盖用户、视频资产、课程、字幕、进度、收藏、生词、录音、上传和处理任务。
+`packages/database` 的 V1 baseline 覆盖身份会话、上传、媒体对象、处理运行/分片、Outbox、字幕版本、私人 Lesson、学习单元与进度、审计和幂等记录。数据库使用复合外键约束 owner/聚合一致性，不包含收藏、生词、翻译、公共发布或云端录音。
 
 `packages/storage` 提供 `StorageProvider` 接口，当前有内存实现和 MinIO 实现。上传目标包含 `objectKey`、`uploadUrl` 和 `expiresAt`。
 

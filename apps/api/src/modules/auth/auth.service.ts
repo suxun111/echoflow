@@ -139,27 +139,31 @@ export class AuthService {
 
   async refresh(refreshToken: string, metadata: ClientMetadata) {
     const tokenHash = this.hashRefreshToken(refreshToken)
-    const session = await this.database.refreshSession.findUnique({ where: { tokenHash }, include: { user: true } })
-    if (!session) throw new ApiException(401, 'unauthenticated', 'Refresh Session 无效')
-
     const now = new Date()
-    if (session.rotatedAt) {
-      await this.database.$transaction([
-        this.database.refreshSession.updateMany({ where: { familyId: session.familyId, revokedAt: null }, data: { revokedAt: now } }),
-        this.database.auditEvent.create({
-          data: { actorId: session.userId, action: 'auth.refresh_replay', resourceType: 'RefreshSession', resourceId: session.id, requestId: metadata.requestId, metadata: {} },
-        }),
-      ])
-      throw new ApiException(401, 'unauthenticated', '检测到 Refresh Token 重放，会话已撤销')
-    }
-    if (session.revokedAt || session.expiresAt <= now || session.user.status !== UserStatus.ACTIVE) {
-      throw new ApiException(401, 'unauthenticated', 'Refresh Session 已失效')
-    }
-
     const nextToken = this.createOpaqueToken()
     const nextId = randomUUID()
     const nextExpiresAt = new Date(now.getTime() + this.env.REFRESH_SESSION_TTL_SECONDS * 1000)
-    await this.database.$transaction(async (transaction) => {
+    const result = await this.database.$transaction(async (transaction) => {
+      const locked = await transaction.$queryRaw<Array<{ id: string }>>`
+        SELECT "id" FROM "RefreshSession" WHERE "tokenHash" = ${tokenHash} FOR UPDATE
+      `
+      if (locked.length === 0) return { kind: 'invalid' as const }
+
+      const session = await transaction.refreshSession.findUniqueOrThrow({ where: { id: locked[0].id }, include: { user: true } })
+      if (session.rotatedAt) {
+        await transaction.refreshSession.updateMany({
+          where: { familyId: session.familyId, revokedAt: null },
+          data: { revokedAt: now },
+        })
+        await transaction.auditEvent.create({
+          data: { actorId: session.userId, action: 'auth.refresh_replay', resourceType: 'RefreshSession', resourceId: session.id, requestId: metadata.requestId, metadata: {} },
+        })
+        return { kind: 'replay' as const }
+      }
+      if (session.revokedAt || session.expiresAt <= now || session.user.status !== UserStatus.ACTIVE) {
+        return { kind: 'invalid' as const }
+      }
+
       await transaction.refreshSession.create({
         data: {
           id: nextId,
@@ -171,15 +175,17 @@ export class AuthService {
           ipHash: this.hashOptional(metadata.ip),
         },
       })
-      const rotated = await transaction.refreshSession.updateMany({
-        where: { id: session.id, rotatedAt: null, revokedAt: null, expiresAt: { gt: now } },
-        data: { rotatedAt: now, lastUsedAt: now },
+      await transaction.refreshSession.update({
+        where: { id: session.id },
+        data: { rotatedAt: now, lastUsedAt: now, replacedById: nextId },
       })
-      if (rotated.count !== 1) throw new ApiException(409, 'conflict', 'Refresh Session 已被并发使用')
-      await transaction.refreshSession.update({ where: { id: session.id }, data: { replacedById: nextId } })
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+      return { kind: 'rotated' as const, user: session.user, familyId: session.familyId }
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted })
 
-    return { response: this.createAccessSession(session.user, session.familyId), refreshToken: nextToken }
+    if (result.kind === 'replay') throw new ApiException(401, 'unauthenticated', '检测到 Refresh Token 重放，会话已撤销')
+    if (result.kind === 'invalid') throw new ApiException(401, 'unauthenticated', 'Refresh Session 已失效')
+
+    return { response: this.createAccessSession(result.user, result.familyId), refreshToken: nextToken }
   }
 
   async logout(refreshToken: string | undefined, metadata: ClientMetadata) {

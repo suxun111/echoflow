@@ -1,133 +1,59 @@
 # EchoFlow API 契约
 
-> 状态说明：本文记录当前原型接口，不是已冻结的 V1 生产契约。V1 目标统一使用 `/api/v1`、真实认证、PostgreSQL 和 owner scope；详细边界见 [EchoFlow V1 PRD](EchoFlow-V1-PRD.md)。G1 完成前不得把本文中的开发验证码、内存任务或原型 refresh 行为用于公网。
+更新时间：2026-08-12
 
-更新时间：2026-07-18
+本文记录 G1 当前生产入口；G2–G5 尚未接通。统一前缀为 `/api/v1`，默认端口为 `3001`，共享结构以 `packages/contracts` 的 Zod schema 为准。
 
-API 默认前缀为 `/api`，开发端口为 `3001`。请求与响应的核心结构由 `packages/contracts` 中的 Zod schema 维护。
+除健康检查和认证入口外，路由默认需要 `Authorization: Bearer <access-token>`。Refresh Token 不进入 JSON 或浏览器存储，只通过名为 `echoflow_refresh` 的 HttpOnly Cookie 传递。
+
+## 通用行为
+
+- 响应回传或生成 `x-request-id`；
+- 错误结构固定为 `{ "code": "...", "message": "...", "details": {}, "requestId": "..." }`；
+- CORS 只允许 `CORS_ALLOWED_ORIGINS` 中的来源；
+- 私人资源 owner 只来自认证上下文，客户端提供同名字段不会改变查询范围；
+- 开发示例库为 `echoflow`，历史 `online_learning` 受迁移脚本保护。
 
 ## 健康检查
 
-`GET /api/health`
+- `GET /api/v1/health`：进程存活；
+- `GET /api/v1/health/ready`：PostgreSQL 可连接。
 
-返回服务状态、服务名和时间戳。
+## 身份
 
-## 认证
-
-`POST /api/auth/request-code`
-
-请求体：
+### `POST /api/v1/auth/otp/request`
 
 ```json
-{ "phone": "13800000000" }
+{ "phone": "+8613800000000" }
 ```
 
-开发环境返回固定验证码 `246810`。`NODE_ENV=production` 时开发短信服务会拒绝请求。
+随机生成六位 OTP，数据库只保存 HMAC。仅在非生产环境且 `AUTH_EXPOSE_TEST_OTP=true` 时，响应包含 `developmentCode`；未配置正式 OTP Delivery 时生产请求返回 503。
 
-`POST /api/auth/verify-code`
-
-请求体：
+### `POST /api/v1/auth/otp/verify`
 
 ```json
-{ "phone": "13800000000", "code": "246810" }
+{ "phone": "+8613800000000", "code": "123456" }
 ```
 
-返回开发访问令牌、刷新令牌和用户信息。
+成功响应包含短期 Access Token 和用户，不包含 Refresh Token；响应同时设置 rotating HttpOnly Cookie。
 
-`POST /api/auth/refresh`
+### `POST /api/v1/auth/refresh`
 
-请求体：
+从 Cookie 读取 opaque Refresh Token，成功后轮换 Cookie。旧 Token 的顺序或并发重放会撤销整个 session family。
 
-```json
-{ "refreshToken": "dev-refresh..." }
-```
+### `POST /api/v1/auth/logout`
 
-## 视频与课程
+撤销 session family、清除 Cookie，成功返回 204。
 
-`GET /api/videos`
+## 当前用户与私人 Lesson
 
-查询参数：
-
-- `search`：按标题、副标题、创作者搜索。
-- `level`：`A1`、`A2`、`B1`、`B2`、`C1`。
-- `category`：课程分类。
-- `accent`：口音。
-- `page`：正整数，默认 `1`。
-- `pageSize`：`1` 到 `50`，默认 `20`。
-
-`GET /api/videos/:id`
-
-返回单个视频摘要，未找到时当前返回 `null`。
-
-`GET /api/lessons/:id`
-
-返回课程详情和字幕 cue 列表。
-
-## 字幕与进度
-
-`GET /api/subtitles/:lessonId`
-
-返回课程字幕版本和 cue 列表。
-
-`PUT /api/subtitles/:lessonId/:cueId`
-
-请求体遵循 `SubtitleCueSchema`，路径中的 `cueId` 会覆盖请求体里的 `id`。
-
-`GET /api/progress/:lessonId`
-
-返回课程学习进度，未找到时返回空进度。
-
-`PUT /api/progress/:lessonId`
-
-请求体：
-
-```json
-{
-  "completedCueIds": ["cue-1"],
-  "positionMs": 5000,
-  "currentCueId": "cue-2"
-}
-```
-
-## 上传与任务
-
-`POST /api/uploads/presign`
-
-请求体：
-
-```json
-{
-  "fileName": "lesson.mp4",
-  "contentType": "video/mp4",
-  "sizeBytes": 1048576,
-  "rightsConfirmed": true
-}
-```
-
-返回私有上传目标和首个处理任务。
-
-`GET /api/jobs`
-
-返回当前内存任务列表。
-
-`GET /api/jobs/:id`
-
-返回单个任务；不存在时返回 404。
+- `GET /api/v1/users/me`：返回当前用户；
+- `GET /api/v1/lessons/:lessonId`：仅按认证 owner 查询；他人同 ID 返回 404，畸形 UUID 返回 400。
 
 ## 管理端
 
-`GET /api/admin/candidates`
+- `GET /api/v1/admin/audit-events`：仅 `ADMIN`；只返回最小审计字段，不授予私人媒体读取能力。
 
-返回候选内容列表。
+## 尚未挂载
 
-`POST /api/admin/assets/:id/review`
-
-请求体：
-
-```json
-{ "status": "approved", "note": "授权确认" }
-```
-
-`POST /api/admin/lessons/:id/publish`
-
-返回发布结果。
+旧 `/api`、固定验证码、公共视频、字幕编辑、内存进度、上传预签名、内存任务和公共发布端点均不属于 G1 当前 API。对应源码骨架将在 G2–G4 按 Gate 接线或清理，不能视为已实现能力。

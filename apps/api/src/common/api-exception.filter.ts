@@ -58,6 +58,8 @@ export class ApiExceptionFilter implements ExceptionFilter {
     const prismaError = exception as PrismaLikeError
     if (prismaError?.code === 'P2002') return { status: 409, code: 'conflict', message: '资源已存在或请求发生冲突' }
     if (prismaError?.code === 'P2003') return { status: 409, code: 'conflict', message: '关联资源状态冲突' }
+    if (prismaError?.code === 'P2023') return { status: 400, code: 'invalid_request', message: '资源标识格式无效' }
+    if (prismaError?.code === 'P2034') return { status: 409, code: 'conflict', message: '并发请求发生冲突，请重试' }
     if (prismaError?.code === 'P2025') return { status: 404, code: 'not_found', message: '资源不存在' }
     return { status: 500, code: 'internal_error', message: '服务器内部错误' }
   }

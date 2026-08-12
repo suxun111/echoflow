@@ -11,25 +11,25 @@ CREATE TYPE "OtpPurpose" AS ENUM ('LOGIN');
 CREATE TYPE "SourceType" AS ENUM ('PERSONAL', 'WORKFLOW');
 
 -- CreateEnum
-CREATE TYPE "UploadStatus" AS ENUM ('CREATED', 'UPLOADING', 'VERIFYING', 'COMPLETED', 'ABORTED', 'EXPIRED', 'FAILED');
+CREATE TYPE "UploadStatus" AS ENUM ('CREATED', 'UPLOADING', 'VERIFYING', 'COMPLETED', 'CANCELLED', 'EXPIRED', 'FAILED');
 
 -- CreateEnum
-CREATE TYPE "MediaAssetStatus" AS ENUM ('UPLOADED', 'PROCESSING', 'READY', 'FAILED', 'DELETING', 'DELETED');
+CREATE TYPE "MediaAssetStatus" AS ENUM ('PROCESSING_PLAYBACK', 'PLAYABLE', 'FAILED', 'DELETING', 'DELETED');
 
 -- CreateEnum
 CREATE TYPE "MediaObjectKind" AS ENUM ('ORIGINAL', 'PLAYBACK', 'NORMALIZED_AUDIO', 'AUDIO_CHUNK', 'ASR_RAW');
 
 -- CreateEnum
-CREATE TYPE "ProcessingStatus" AS ENUM ('QUEUED', 'CLAIMED', 'WAITING_DEPENDENCY', 'PROCESSING', 'COMPLETED', 'FAILED', 'CANCELED');
+CREATE TYPE "ProcessingStatus" AS ENUM ('QUEUED', 'PROCESSING', 'VALIDATING', 'SUCCEEDED', 'FAILED', 'CANCELLED');
 
 -- CreateEnum
-CREATE TYPE "ProcessingStage" AS ENUM ('VERIFY_MEDIA', 'EXTRACT_AUDIO', 'TRANSCRIBE', 'MERGE_TRANSCRIPT', 'PUBLISH');
+CREATE TYPE "ProcessingStage" AS ENUM ('UPLOAD_VERIFIED', 'PROBING', 'PLAYBACK_READY', 'AUDIO_EXTRACTING', 'CHUNKING', 'TRANSCRIBING', 'MERGING', 'CUE_SEGMENTING', 'VALIDATING', 'TRANSCRIPT_READY', 'COURSE_READY');
 
 -- CreateEnum
 CREATE TYPE "OutboxStatus" AS ENUM ('PENDING', 'PUBLISHED', 'FAILED');
 
 -- CreateEnum
-CREATE TYPE "TranscriptStatus" AS ENUM ('DRAFT', 'READY', 'REJECTED');
+CREATE TYPE "TranscriptStatus" AS ENUM ('BUILDING', 'ACTIVE', 'SUPERSEDED', 'REJECTED');
 
 -- CreateEnum
 CREATE TYPE "LessonStatus" AS ENUM ('PROCESSING', 'READY', 'ARCHIVED');
@@ -122,7 +122,7 @@ CREATE TABLE "MediaAsset" (
     "ownerId" UUID NOT NULL,
     "uploadSessionId" UUID,
     "sourceType" "SourceType" NOT NULL DEFAULT 'PERSONAL',
-    "status" "MediaAssetStatus" NOT NULL DEFAULT 'UPLOADED',
+    "status" "MediaAssetStatus" NOT NULL DEFAULT 'PROCESSING_PLAYBACK',
     "title" VARCHAR(300) NOT NULL,
     "originalName" VARCHAR(512) NOT NULL,
     "durationMs" INTEGER,
@@ -157,7 +157,7 @@ CREATE TABLE "ProcessingRun" (
     "mediaAssetId" UUID NOT NULL,
     "pipelineVersion" VARCHAR(128) NOT NULL,
     "status" "ProcessingStatus" NOT NULL DEFAULT 'QUEUED',
-    "stage" "ProcessingStage" NOT NULL DEFAULT 'VERIFY_MEDIA',
+    "stage" "ProcessingStage" NOT NULL DEFAULT 'UPLOAD_VERIFIED',
     "attempt" INTEGER NOT NULL DEFAULT 0,
     "requestId" VARCHAR(128),
     "errorCode" VARCHAR(128),
@@ -217,7 +217,7 @@ CREATE TABLE "TranscriptVersion" (
     "mediaAssetId" UUID NOT NULL,
     "version" INTEGER NOT NULL,
     "language" VARCHAR(16) NOT NULL DEFAULT 'en',
-    "status" "TranscriptStatus" NOT NULL DEFAULT 'DRAFT',
+    "status" "TranscriptStatus" NOT NULL DEFAULT 'BUILDING',
     "durationMs" INTEGER NOT NULL,
     "cueCount" INTEGER NOT NULL DEFAULT 0,
     "publishedAt" TIMESTAMP(3),
@@ -272,6 +272,7 @@ CREATE TABLE "LearningProgress" (
     "ownerId" UUID NOT NULL,
     "lessonId" UUID NOT NULL,
     "currentUnitId" UUID,
+    "currentTranscriptVersionId" UUID,
     "currentCueId" UUID,
     "positionMs" INTEGER NOT NULL DEFAULT 0,
     "completedCueIds" JSONB NOT NULL,
@@ -346,6 +347,9 @@ CREATE INDEX "UploadSession_ownerId_status_idx" ON "UploadSession"("ownerId", "s
 CREATE INDEX "UploadSession_expiresAt_idx" ON "UploadSession"("expiresAt");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "UploadSession_id_ownerId_key" ON "UploadSession"("id", "ownerId");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "UploadPart_uploadSessionId_partNumber_key" ON "UploadPart"("uploadSessionId", "partNumber");
 
 -- CreateIndex
@@ -353,6 +357,12 @@ CREATE UNIQUE INDEX "MediaAsset_uploadSessionId_key" ON "MediaAsset"("uploadSess
 
 -- CreateIndex
 CREATE INDEX "MediaAsset_ownerId_status_createdAt_idx" ON "MediaAsset"("ownerId", "status", "createdAt");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "MediaAsset_id_ownerId_key" ON "MediaAsset"("id", "ownerId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "MediaAsset_uploadSessionId_ownerId_key" ON "MediaAsset"("uploadSessionId", "ownerId");
 
 -- CreateIndex
 CREATE INDEX "MediaObject_mediaAssetId_kind_idx" ON "MediaObject"("mediaAssetId", "kind");
@@ -391,10 +401,16 @@ CREATE INDEX "TranscriptVersion_mediaAssetId_status_idx" ON "TranscriptVersion"(
 CREATE UNIQUE INDEX "TranscriptVersion_mediaAssetId_version_key" ON "TranscriptVersion"("mediaAssetId", "version");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "TranscriptVersion_id_mediaAssetId_key" ON "TranscriptVersion"("id", "mediaAssetId");
+
+-- CreateIndex
 CREATE INDEX "SubtitleCue_transcriptVersionId_startMs_idx" ON "SubtitleCue"("transcriptVersionId", "startMs");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "SubtitleCue_transcriptVersionId_order_key" ON "SubtitleCue"("transcriptVersionId", "order");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "SubtitleCue_id_transcriptVersionId_key" ON "SubtitleCue"("id", "transcriptVersionId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "PrivateLesson_mediaAssetId_key" ON "PrivateLesson"("mediaAssetId");
@@ -406,7 +422,22 @@ CREATE UNIQUE INDEX "PrivateLesson_transcriptVersionId_key" ON "PrivateLesson"("
 CREATE INDEX "PrivateLesson_ownerId_status_updatedAt_idx" ON "PrivateLesson"("ownerId", "status", "updatedAt");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "PrivateLesson_id_ownerId_key" ON "PrivateLesson"("id", "ownerId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "PrivateLesson_mediaAssetId_ownerId_key" ON "PrivateLesson"("mediaAssetId", "ownerId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "PrivateLesson_transcriptVersionId_mediaAssetId_key" ON "PrivateLesson"("transcriptVersionId", "mediaAssetId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "PrivateLesson_id_transcriptVersionId_key" ON "PrivateLesson"("id", "transcriptVersionId");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "LearningUnit_lessonId_order_key" ON "LearningUnit"("lessonId", "order");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "LearningUnit_id_lessonId_key" ON "LearningUnit"("id", "lessonId");
 
 -- CreateIndex
 CREATE INDEX "LearningProgress_lessonId_idx" ON "LearningProgress"("lessonId");
@@ -445,7 +476,7 @@ ALTER TABLE "UploadPart" ADD CONSTRAINT "UploadPart_uploadSessionId_fkey" FOREIG
 ALTER TABLE "MediaAsset" ADD CONSTRAINT "MediaAsset_ownerId_fkey" FOREIGN KEY ("ownerId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "MediaAsset" ADD CONSTRAINT "MediaAsset_uploadSessionId_fkey" FOREIGN KEY ("uploadSessionId") REFERENCES "UploadSession"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "MediaAsset" ADD CONSTRAINT "MediaAsset_uploadSessionId_ownerId_fkey" FOREIGN KEY ("uploadSessionId", "ownerId") REFERENCES "UploadSession"("id", "ownerId") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "MediaObject" ADD CONSTRAINT "MediaObject_mediaAssetId_fkey" FOREIGN KEY ("mediaAssetId") REFERENCES "MediaAsset"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -454,7 +485,7 @@ ALTER TABLE "MediaObject" ADD CONSTRAINT "MediaObject_mediaAssetId_fkey" FOREIGN
 ALTER TABLE "ProcessingRun" ADD CONSTRAINT "ProcessingRun_ownerId_fkey" FOREIGN KEY ("ownerId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "ProcessingRun" ADD CONSTRAINT "ProcessingRun_mediaAssetId_fkey" FOREIGN KEY ("mediaAssetId") REFERENCES "MediaAsset"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "ProcessingRun" ADD CONSTRAINT "ProcessingRun_mediaAssetId_ownerId_fkey" FOREIGN KEY ("mediaAssetId", "ownerId") REFERENCES "MediaAsset"("id", "ownerId") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "ProcessingChunk" ADD CONSTRAINT "ProcessingChunk_processingRunId_fkey" FOREIGN KEY ("processingRunId") REFERENCES "ProcessingRun"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -469,10 +500,10 @@ ALTER TABLE "SubtitleCue" ADD CONSTRAINT "SubtitleCue_transcriptVersionId_fkey" 
 ALTER TABLE "PrivateLesson" ADD CONSTRAINT "PrivateLesson_ownerId_fkey" FOREIGN KEY ("ownerId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "PrivateLesson" ADD CONSTRAINT "PrivateLesson_mediaAssetId_fkey" FOREIGN KEY ("mediaAssetId") REFERENCES "MediaAsset"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "PrivateLesson" ADD CONSTRAINT "PrivateLesson_mediaAssetId_ownerId_fkey" FOREIGN KEY ("mediaAssetId", "ownerId") REFERENCES "MediaAsset"("id", "ownerId") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "PrivateLesson" ADD CONSTRAINT "PrivateLesson_transcriptVersionId_fkey" FOREIGN KEY ("transcriptVersionId") REFERENCES "TranscriptVersion"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "PrivateLesson" ADD CONSTRAINT "PrivateLesson_transcriptVersionId_mediaAssetId_fkey" FOREIGN KEY ("transcriptVersionId", "mediaAssetId") REFERENCES "TranscriptVersion"("id", "mediaAssetId") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "LearningUnit" ADD CONSTRAINT "LearningUnit_lessonId_fkey" FOREIGN KEY ("lessonId") REFERENCES "PrivateLesson"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -481,7 +512,16 @@ ALTER TABLE "LearningUnit" ADD CONSTRAINT "LearningUnit_lessonId_fkey" FOREIGN K
 ALTER TABLE "LearningProgress" ADD CONSTRAINT "LearningProgress_ownerId_fkey" FOREIGN KEY ("ownerId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "LearningProgress" ADD CONSTRAINT "LearningProgress_lessonId_fkey" FOREIGN KEY ("lessonId") REFERENCES "PrivateLesson"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "LearningProgress" ADD CONSTRAINT "LearningProgress_lessonId_ownerId_fkey" FOREIGN KEY ("lessonId", "ownerId") REFERENCES "PrivateLesson"("id", "ownerId") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "LearningProgress" ADD CONSTRAINT "LearningProgress_currentUnitId_lessonId_fkey" FOREIGN KEY ("currentUnitId", "lessonId") REFERENCES "LearningUnit"("id", "lessonId") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "LearningProgress" ADD CONSTRAINT "LearningProgress_lessonId_currentTranscriptVersionId_fkey" FOREIGN KEY ("lessonId", "currentTranscriptVersionId") REFERENCES "PrivateLesson"("id", "transcriptVersionId") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "LearningProgress" ADD CONSTRAINT "LearningProgress_currentCueId_currentTranscriptVersionId_fkey" FOREIGN KEY ("currentCueId", "currentTranscriptVersionId") REFERENCES "SubtitleCue"("id", "transcriptVersionId") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "AuditEvent" ADD CONSTRAINT "AuditEvent_actorId_fkey" FOREIGN KEY ("actorId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
@@ -493,13 +533,22 @@ ALTER TABLE "IdempotencyRecord" ADD CONSTRAINT "IdempotencyRecord_ownerId_fkey" 
 ALTER TABLE "OtpChallenge" ADD CONSTRAINT "OtpChallenge_attempts_check" CHECK ("attempts" >= 0 AND "attempts" <= "maxAttempts");
 ALTER TABLE "UploadSession" ADD CONSTRAINT "UploadSession_size_check" CHECK ("sizeBytes" > 0 AND "partSizeBytes" > 0);
 ALTER TABLE "UploadPart" ADD CONSTRAINT "UploadPart_values_check" CHECK ("partNumber" > 0 AND "sizeBytes" > 0);
-ALTER TABLE "ProcessingChunk" ADD CONSTRAINT "ProcessingChunk_time_check" CHECK ("startMs" >= 0 AND "endMs" > "startMs");
-ALTER TABLE "SubtitleCue" ADD CONSTRAINT "SubtitleCue_time_check" CHECK ("startMs" >= 0 AND "endMs" > "startMs");
-ALTER TABLE "LearningUnit" ADD CONSTRAINT "LearningUnit_time_check" CHECK ("startMs" >= 0 AND "endMs" > "startMs" AND "firstCueOrder" >= 0 AND "lastCueOrder" >= "firstCueOrder");
+ALTER TABLE "MediaAsset" ADD CONSTRAINT "MediaAsset_duration_check" CHECK ("durationMs" IS NULL OR "durationMs" > 0);
+ALTER TABLE "MediaObject" ADD CONSTRAINT "MediaObject_size_check" CHECK ("sizeBytes" > 0);
+ALTER TABLE "ProcessingRun" ADD CONSTRAINT "ProcessingRun_attempt_check" CHECK ("attempt" >= 0);
+ALTER TABLE "ProcessingChunk" ADD CONSTRAINT "ProcessingChunk_time_check" CHECK ("startMs" >= 0 AND "endMs" > "startMs" AND "chunkIndex" >= 0 AND "attempt" >= 0);
+ALTER TABLE "OutboxEvent" ADD CONSTRAINT "OutboxEvent_attempts_check" CHECK ("attempts" >= 0);
+ALTER TABLE "TranscriptVersion" ADD CONSTRAINT "TranscriptVersion_values_check" CHECK ("version" > 0 AND "durationMs" > 0 AND "cueCount" >= 0);
+ALTER TABLE "SubtitleCue" ADD CONSTRAINT "SubtitleCue_time_check" CHECK ("startMs" >= 0 AND "endMs" > "startMs" AND "order" >= 0);
+ALTER TABLE "LearningUnit" ADD CONSTRAINT "LearningUnit_time_check" CHECK ("startMs" >= 0 AND "endMs" > "startMs" AND "order" >= 0 AND "firstCueOrder" >= 0 AND "lastCueOrder" >= "firstCueOrder");
 ALTER TABLE "LearningProgress" ADD CONSTRAINT "LearningProgress_position_check" CHECK ("positionMs" >= 0);
+ALTER TABLE "LearningProgress" ADD CONSTRAINT "LearningProgress_current_cue_check" CHECK (("currentCueId" IS NULL) = ("currentTranscriptVersionId" IS NULL));
 CREATE UNIQUE INDEX "UploadSession_one_active_per_owner"
   ON "UploadSession" ("ownerId")
   WHERE "status" IN ('CREATED', 'UPLOADING', 'VERIFYING');
 CREATE UNIQUE INDEX "MediaObject_current_object_key"
   ON "MediaObject" ("bucket", "objectKey")
   WHERE "versionId" IS NULL;
+CREATE UNIQUE INDEX "TranscriptVersion_one_active_per_media"
+  ON "TranscriptVersion" ("mediaAssetId")
+  WHERE "status" = 'ACTIVE';

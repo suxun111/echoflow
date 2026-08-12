@@ -5,11 +5,14 @@ export const PhoneSchema = z.string().regex(/^\+[1-9]\d{7,14}$/, '手机号必�
 export const UserRoleSchema = z.enum(['learner', 'admin'])
 export const UserStatusSchema = z.enum(['active', 'disabled', 'deleted'])
 
-export const UploadStatusSchema = z.enum(['created', 'uploading', 'verifying', 'completed', 'aborted', 'expired', 'failed'])
-export const MediaAssetStatusSchema = z.enum(['uploaded', 'processing', 'ready', 'failed', 'deleting', 'deleted'])
-export const ProcessingStatusSchema = z.enum(['queued', 'claimed', 'waiting_dependency', 'processing', 'completed', 'failed', 'canceled'])
-export const ProcessingStageSchema = z.enum(['verify_media', 'extract_audio', 'transcribe', 'merge_transcript', 'publish'])
-export const TranscriptStatusSchema = z.enum(['draft', 'ready', 'rejected'])
+export const UploadStatusSchema = z.enum(['created', 'uploading', 'verifying', 'completed', 'cancelled', 'expired', 'failed'])
+export const MediaAssetStatusSchema = z.enum(['processing_playback', 'playable', 'failed', 'deleting', 'deleted'])
+export const ProcessingStatusSchema = z.enum(['queued', 'processing', 'validating', 'succeeded', 'failed', 'cancelled'])
+export const ProcessingStageSchema = z.enum([
+  'upload_verified', 'probing', 'playback_ready', 'audio_extracting', 'chunking', 'transcribing',
+  'merging', 'cue_segmenting', 'validating', 'transcript_ready', 'course_ready',
+])
+export const TranscriptStatusSchema = z.enum(['building', 'active', 'superseded', 'rejected'])
 export const LessonStatusSchema = z.enum(['processing', 'ready', 'archived'])
 
 export const AuthUserSchema = z.object({

@@ -32,15 +32,14 @@ enum UploadStatus {
   UPLOADING
   VERIFYING
   COMPLETED
-  ABORTED
+  CANCELLED
   EXPIRED
   FAILED
 }
 
 enum MediaAssetStatus {
-  UPLOADED
-  PROCESSING
-  READY
+  PROCESSING_PLAYBACK
+  PLAYABLE
   FAILED
   DELETING
   DELETED
@@ -56,20 +55,25 @@ enum MediaObjectKind {
 
 enum ProcessingStatus {
   QUEUED
-  CLAIMED
-  WAITING_DEPENDENCY
   PROCESSING
-  COMPLETED
+  VALIDATING
+  SUCCEEDED
   FAILED
-  CANCELED
+  CANCELLED
 }
 
 enum ProcessingStage {
-  VERIFY_MEDIA
-  EXTRACT_AUDIO
-  TRANSCRIBE
-  MERGE_TRANSCRIPT
-  PUBLISH
+  UPLOAD_VERIFIED
+  PROBING
+  PLAYBACK_READY
+  AUDIO_EXTRACTING
+  CHUNKING
+  TRANSCRIBING
+  MERGING
+  CUE_SEGMENTING
+  VALIDATING
+  TRANSCRIPT_READY
+  COURSE_READY
 }
 
 enum OutboxStatus {
@@ -79,8 +83,9 @@ enum OutboxStatus {
 }
 
 enum TranscriptStatus {
-  DRAFT
-  READY
+  BUILDING
+  ACTIVE
+  SUPERSEDED
   REJECTED
 }
 
@@ -169,6 +174,7 @@ model UploadSession {
   parts            UploadPart[]
   mediaAsset       MediaAsset?
 
+  @@unique([id, ownerId])
   @@index([ownerId, status])
   @@index([expiresAt])
 }
@@ -191,7 +197,7 @@ model MediaAsset {
   ownerId            String              @db.Uuid
   uploadSessionId    String?             @unique @db.Uuid
   sourceType         SourceType          @default(PERSONAL)
-  status             MediaAssetStatus    @default(UPLOADED)
+  status             MediaAssetStatus    @default(PROCESSING_PLAYBACK)
   title              String              @db.VarChar(300)
   originalName       String              @db.VarChar(512)
   durationMs         Int?
@@ -199,12 +205,14 @@ model MediaAsset {
   updatedAt          DateTime            @updatedAt
   deletedAt          DateTime?
   owner              User                @relation(fields: [ownerId], references: [id], onDelete: Cascade)
-  uploadSession      UploadSession?      @relation(fields: [uploadSessionId], references: [id], onDelete: SetNull)
+  uploadSession      UploadSession?      @relation(fields: [uploadSessionId, ownerId], references: [id, ownerId], onDelete: Restrict)
   objects            MediaObject[]
   processingRuns     ProcessingRun[]
   transcriptVersions TranscriptVersion[]
   privateLesson      PrivateLesson?
 
+  @@unique([id, ownerId])
+  @@unique([uploadSessionId, ownerId])
   @@index([ownerId, status, createdAt])
 }
 
@@ -232,7 +240,7 @@ model ProcessingRun {
   mediaAssetId    String            @db.Uuid
   pipelineVersion String            @db.VarChar(128)
   status          ProcessingStatus  @default(QUEUED)
-  stage           ProcessingStage   @default(VERIFY_MEDIA)
+  stage           ProcessingStage   @default(UPLOAD_VERIFIED)
   attempt         Int               @default(0)
   requestId       String?           @db.VarChar(128)
   errorCode       String?           @db.VarChar(128)
@@ -245,7 +253,7 @@ model ProcessingRun {
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
   owner           User              @relation(fields: [ownerId], references: [id], onDelete: Cascade)
-  mediaAsset      MediaAsset        @relation(fields: [mediaAssetId], references: [id], onDelete: Cascade)
+  mediaAsset      MediaAsset        @relation(fields: [mediaAssetId, ownerId], references: [id, ownerId], onDelete: Cascade)
   chunks          ProcessingChunk[]
 
   @@index([ownerId, status])
@@ -297,7 +305,7 @@ model TranscriptVersion {
   mediaAssetId  String           @db.Uuid
   version       Int
   language      String           @default("en") @db.VarChar(16)
-  status        TranscriptStatus @default(DRAFT)
+  status        TranscriptStatus @default(BUILDING)
   durationMs    Int
   cueCount      Int              @default(0)
   publishedAt   DateTime?
@@ -307,20 +315,23 @@ model TranscriptVersion {
   privateLesson PrivateLesson?
 
   @@unique([mediaAssetId, version])
+  @@unique([id, mediaAssetId])
   @@index([mediaAssetId, status])
 }
 
 model SubtitleCue {
-  id                  String            @id @default(uuid()) @db.Uuid
-  transcriptVersionId String            @db.Uuid
+  id                  String             @id @default(uuid()) @db.Uuid
+  transcriptVersionId String             @db.Uuid
   order               Int
   startMs             Int
   endMs               Int
   text                String
   words               Json
-  transcriptVersion   TranscriptVersion @relation(fields: [transcriptVersionId], references: [id], onDelete: Cascade)
+  transcriptVersion   TranscriptVersion  @relation(fields: [transcriptVersionId], references: [id], onDelete: Cascade)
+  currentProgresses   LearningProgress[]
 
   @@unique([transcriptVersionId, order])
+  @@unique([id, transcriptVersionId])
   @@index([transcriptVersionId, startMs])
 }
 
@@ -334,38 +345,49 @@ model PrivateLesson {
   createdAt           DateTime           @default(now())
   updatedAt           DateTime           @updatedAt
   owner               User               @relation(fields: [ownerId], references: [id], onDelete: Cascade)
-  mediaAsset          MediaAsset         @relation(fields: [mediaAssetId], references: [id], onDelete: Cascade)
-  transcriptVersion   TranscriptVersion? @relation(fields: [transcriptVersionId], references: [id], onDelete: SetNull)
+  mediaAsset          MediaAsset         @relation(fields: [mediaAssetId, ownerId], references: [id, ownerId], onDelete: Cascade)
+  transcriptVersion   TranscriptVersion? @relation(fields: [transcriptVersionId, mediaAssetId], references: [id, mediaAssetId], onDelete: Restrict)
   learningUnits       LearningUnit[]
-  progresses          LearningProgress[]
+  progresses          LearningProgress[] @relation("LessonProgress")
+  currentProgresses   LearningProgress[] @relation("ProgressTranscript")
 
+  @@unique([id, ownerId])
+  @@unique([mediaAssetId, ownerId])
+  @@unique([transcriptVersionId, mediaAssetId])
+  @@unique([id, transcriptVersionId])
   @@index([ownerId, status, updatedAt])
 }
 
 model LearningUnit {
-  id            String        @id @default(uuid()) @db.Uuid
-  lessonId      String        @db.Uuid
-  order         Int
-  startMs       Int
-  endMs         Int
-  firstCueOrder Int
-  lastCueOrder  Int
-  lesson        PrivateLesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  id                String             @id @default(uuid()) @db.Uuid
+  lessonId          String             @db.Uuid
+  order             Int
+  startMs           Int
+  endMs             Int
+  firstCueOrder     Int
+  lastCueOrder      Int
+  lesson            PrivateLesson      @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  currentProgresses LearningProgress[]
 
   @@unique([lessonId, order])
+  @@unique([id, lessonId])
 }
 
 model LearningProgress {
-  id              String        @id @default(uuid()) @db.Uuid
-  ownerId         String        @db.Uuid
-  lessonId        String        @db.Uuid
-  currentUnitId   String?       @db.Uuid
-  currentCueId    String?       @db.Uuid
-  positionMs      Int           @default(0)
-  completedCueIds Json
-  updatedAt       DateTime      @updatedAt
-  owner           User          @relation(fields: [ownerId], references: [id], onDelete: Cascade)
-  lesson          PrivateLesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  id                         String         @id @default(uuid()) @db.Uuid
+  ownerId                    String         @db.Uuid
+  lessonId                   String         @db.Uuid
+  currentUnitId              String?        @db.Uuid
+  currentTranscriptVersionId String?        @db.Uuid
+  currentCueId               String?        @db.Uuid
+  positionMs                 Int            @default(0)
+  completedCueIds            Json
+  updatedAt                  DateTime       @updatedAt
+  owner                      User           @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  lesson                     PrivateLesson  @relation("LessonProgress", fields: [lessonId, ownerId], references: [id, ownerId], onDelete: Cascade)
+  currentUnit                LearningUnit?  @relation(fields: [currentUnitId, lessonId], references: [id, lessonId], onDelete: Restrict)
+  currentTranscript          PrivateLesson? @relation("ProgressTranscript", fields: [lessonId, currentTranscriptVersionId], references: [id, transcriptVersionId], onDelete: Restrict)
+  currentCue                 SubtitleCue?   @relation(fields: [currentCueId, currentTranscriptVersionId], references: [id, transcriptVersionId], onDelete: Restrict)
 
   @@unique([ownerId, lessonId])
   @@index([lessonId])

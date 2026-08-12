@@ -25,8 +25,13 @@ describe('server environment safety', () => {
     ['CORS_ALLOWED_ORIGINS', '*'],
     ['AUTH_EXPOSE_TEST_OTP', 'true'],
     ['REFRESH_COOKIE_SECURE', 'false'],
+    ['DATABASE_URL', 'postgresql://user:password@db.example:5432/online_learning'],
   ])('rejects unsafe production setting %s', (key, value) => {
     const candidate: Record<string, string | undefined> = { ...valid, [key]: value }
     expect(() => loadServerEnv(candidate)).toThrow()
+  })
+
+  it('rejects an allowlist containing no valid origin', () => {
+    expect(() => loadServerEnv({ ...valid, CORS_ALLOWED_ORIGINS: ' ,  ' })).toThrow()
   })
 })

@@ -16,8 +16,8 @@
     "build": "tsc -p tsconfig.json",
     "test": "vitest run",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "migrate": "prisma migrate dev",
-    "migrate:deploy": "prisma migrate deploy",
+    "migrate": "tsx scripts/run-migration.ts dev",
+    "migrate:deploy": "tsx scripts/run-migration.ts deploy",
     "test:prepare": "tsx scripts/prepare-test-database.ts",
     "seed": "tsx prisma/seed.ts"
   },
