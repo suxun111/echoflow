@@ -127,7 +127,7 @@ describe('G2 upload page recovery behavior', () => {
     expect(mocks.removeUploadManifest).toHaveBeenCalledWith(fingerprint)
   })
 
-  it('retries complete after a lost success response and accepts the same completed asset', async () => {
+  it('accepts the same completed asset after the original complete response is lost', async () => {
     const verifying = { ...session, status: 'verifying' as const, uploadedBytes: 11, parts: [
       session.parts[0],
       { partNumber: 2, sizeBytes: 5, etag: 'etag-2', completedAt: new Date().toISOString() },
@@ -158,8 +158,9 @@ describe('G2 upload page recovery behavior', () => {
     await screen.findByText('响应在服务端提交后丢失')
     fireEvent.click(screen.getByRole('button', { name: '继续缺失分片' }))
 
-    await waitFor(() => expect(completeAttempts).toBe(2))
+    await waitFor(() => expect(mocks.removeUploadManifest).toHaveBeenCalledWith(fingerprint))
+    expect(completeAttempts).toBe(1)
     expect(mocks.uploadMultipart).not.toHaveBeenCalled()
-    expect(mocks.removeUploadManifest).toHaveBeenCalledWith(fingerprint)
+    expect(await screen.findByText('上传已完整保存，正在检查视频是否可直接播放。')).toBeInTheDocument()
   })
 })

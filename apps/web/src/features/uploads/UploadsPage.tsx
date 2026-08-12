@@ -152,7 +152,9 @@ export function UploadsPage({ api }: { api: ApiClient }) {
       const controller = new AbortController()
       abortRef.current = controller
       let result: { upload: UploadSessionView; mediaAssetId: string }
-      if (session.status === 'verifying') {
+      if (session.status === 'completed' && session.mediaAssetId) {
+        result = { upload: session, mediaAssetId: session.mediaAssetId }
+      } else if (session.status === 'verifying') {
         setPhase('verifying')
         result = await api.fetchJson(`/uploads/${session.id}/complete`, { method: 'POST' })
       } else {
