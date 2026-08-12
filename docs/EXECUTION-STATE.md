@@ -9,15 +9,16 @@
 | 字段 | 当前值 |
 |---|---|
 | Goal | `v0.5.0-alpha.1` |
-| Gate | `G0 已关闭；待启动 G1` |
+| Gate | `G1 契约、数据库、身份和安全` |
 | 唯一 trunk | `master` |
 | V1 产品代码审计源点 | `42968ad` |
 | G0 文档基线 | `d01c67e`，已 fast-forward 至 master |
 | fresh-clone 修复 | `0e3c912`，已 fast-forward 至 master；来源分支为 `codex/g0-fresh-clone-topology-20260811` |
-| WIP | 等待 G1 任务合同 |
-| 产品功能开发 | 冻结至用户确认开始 G1 |
+| G1 实施分支 | `codex/g1-contract-database-auth-20260812`，基于 `master@9fadacc` |
+| WIP | G1 任务合同冻结，开始 contracts/database/auth 纵向闭环 |
+| 产品功能开发 | 仅允许 G1 合同范围；G2–G5 冻结 |
 | Remote | `origin = https://github.com/suxun111/echoflow.git`；Private；外部恢复验证通过 |
-| 下一人工边界 | 确认进入 G1 契约、数据库、身份和安全 |
+| 下一人工边界 | G1 验证与 Reviewer 通过后判断是否进入 G2 |
 
 ## 2026-08-11 决策澄清
 
@@ -89,9 +90,10 @@
 - 在该 GitHub fresh clone 中执行 `pnpm install --frozen-lockfile`、`pnpm lint`、`pnpm test` 和 `pnpm build`，全部通过；
 - 测试仍为 31 个，Web、Admin、API、Worker 生产构建全部通过；该证据边界仍不包含真实 PostgreSQL、Redis、MinIO、MOSS 和生产部署。
 
-## 当前等待
+## 当前进行中
 
-- 用户确认是否开始 G1：契约、数据库、身份和安全。
+- 按 [G1 任务合同](G1-TASK-CONTRACT.md) 实施 `/api/v1` contracts、V1 PostgreSQL baseline、OTP/Access/Refresh、owner/RBAC 和真实集成门禁；
+- 在 G1 通过前不开始 Multipart 上传和 G2。
 
 ## G0 退出条件（已全部完成）
 
