@@ -160,8 +160,11 @@ model UploadSession {
   sourceType       SourceType   @default(PERSONAL)
   status           UploadStatus @default(CREATED)
   originalName     String       @db.VarChar(512)
+  title            String       @default("Untitled video") @db.VarChar(300)
   contentType      String       @db.VarChar(128)
   sizeBytes        BigInt
+  fileFingerprint  String?      @db.Char(64)
+  bucket           String       @default("online-learning") @db.VarChar(255)
   objectKey        String       @unique @db.VarChar(1024)
   providerUploadId String?      @db.VarChar(512)
   partSizeBytes    BigInt
@@ -226,6 +229,8 @@ model MediaObject {
   contentType    String          @db.VarChar(128)
   sizeBytes      BigInt
   checksumSha256 String?         @db.Char(64)
+  etag           String?         @db.VarChar(512)
+  metadata       Json?
   createdAt      DateTime        @default(now())
   deletedAt      DateTime?
   mediaAsset     MediaAsset      @relation(fields: [mediaAssetId], references: [id], onDelete: Cascade)

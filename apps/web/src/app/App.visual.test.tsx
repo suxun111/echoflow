@@ -1,12 +1,13 @@
-import { render } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import App from './App'
 
 describe('EchoFlow visual baseline', () => {
-  it('renders the library without the retired pop-art decoration hooks', () => {
+  it('starts from the real private-session boundary without retired decoration hooks', async () => {
     render(<App />)
 
-    expect(document.querySelector('.library-page')).not.toHaveAttribute('data-visual-theme')
+    expect(await screen.findByText('继续你的学习空间')).toBeInTheDocument()
     expect(document.querySelector('.featured-halftone')).not.toBeInTheDocument()
+    expect(screen.queryByText('生词本')).not.toBeInTheDocument()
   })
 })

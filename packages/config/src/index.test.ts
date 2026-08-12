@@ -11,6 +11,7 @@ const valid = {
   CORS_ALLOWED_ORIGINS: 'https://echoflow.example',
   AUTH_EXPOSE_TEST_OTP: 'false',
   REFRESH_COOKIE_SECURE: 'true',
+  MINIO_USE_SSL: 'true',
 }
 
 describe('server environment safety', () => {
@@ -25,6 +26,7 @@ describe('server environment safety', () => {
     ['CORS_ALLOWED_ORIGINS', '*'],
     ['AUTH_EXPOSE_TEST_OTP', 'true'],
     ['REFRESH_COOKIE_SECURE', 'false'],
+    ['MINIO_USE_SSL', 'false'],
     ['DATABASE_URL', 'postgresql://user:password@db.example:5432/online_learning'],
   ])('rejects unsafe production setting %s', (key, value) => {
     const candidate: Record<string, string | undefined> = { ...valid, [key]: value }

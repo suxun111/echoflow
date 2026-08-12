@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 describe('V1 Prisma baseline', () => {
   const schema = readFileSync(resolve(__dirname, '../prisma/schema.prisma'), 'utf8')
   const migration = readFileSync(resolve(__dirname, '../prisma/migrations/20260812000100_v1_baseline/migration.sql'), 'utf8')
+  const g2Migration = readFileSync(resolve(__dirname, '../prisma/migrations/20260812000200_g2_upload_metadata/migration.sql'), 'utf8')
 
   it('contains every V1 core model', () => {
     for (const model of [
@@ -53,5 +54,13 @@ describe('V1 Prisma baseline', () => {
   it('generates the Prisma Client before compiling a fresh workspace', () => {
     const packageJson = JSON.parse(readFileSync(resolve(__dirname, '../package.json'), 'utf8')) as { scripts: Record<string, string> }
     expect(packageJson.scripts.build).toBe('prisma generate && tsc -p tsconfig.json')
+  })
+
+  it('adds G2 resume identity and object evidence without rewriting the baseline', () => {
+    expect(schema).toContain('fileFingerprint  String?')
+    expect(schema).toContain('etag           String?')
+    expect(g2Migration).toContain('UploadSession_ownerId_fileFingerprint_idx')
+    expect(g2Migration).toContain('UploadSession_fingerprint_check')
+    expect(g2Migration).toContain('ADD COLUMN "etag"')
   })
 })

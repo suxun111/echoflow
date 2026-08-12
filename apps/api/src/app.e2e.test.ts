@@ -1,6 +1,7 @@
 import 'reflect-metadata'
 import type { INestApplication } from '@nestjs/common'
 import { UserRole } from '@online-learning/database'
+import { MinioStorageProvider } from '@online-learning/storage'
 import jwt from 'jsonwebtoken'
 import request from 'supertest'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
@@ -10,6 +11,14 @@ import { DatabaseService } from './database/database.module'
 import { createTestEnv } from './test/test-env'
 
 const env = createTestEnv()
+const minio = new MinioStorageProvider({
+  endPoint: env.MINIO_ENDPOINT,
+  port: env.MINIO_PORT,
+  useSSL: env.MINIO_USE_SSL,
+  accessKey: env.MINIO_ACCESS_KEY,
+  secretKey: env.MINIO_SECRET_KEY,
+  bucket: env.MINIO_BUCKET,
+})
 
 type LoginResult = {
   accessToken: string
@@ -19,7 +28,7 @@ type LoginResult = {
   user: { id: string; phone: string; role: string }
 }
 
-describe('G1 real PostgreSQL auth and owner boundary', () => {
+describe('EchoFlow real PostgreSQL, auth, upload and owner boundary', () => {
   let app: INestApplication
   let database: DatabaseService
   const requestLogs: RequestLog[] = []
@@ -67,7 +76,11 @@ describe('G1 real PostgreSQL auth and owner boundary', () => {
     }
   }
 
-  beforeAll(startApp)
+  beforeAll(async () => {
+    await minio.ensureBucket()
+    await minio.ensureVersioning()
+    await startApp()
+  })
   beforeEach(async () => {
     requestLogs.length = 0
     await cleanDatabase()
@@ -371,5 +384,158 @@ describe('G1 real PostgreSQL auth and owner boundary', () => {
         completedCueIds: [],
       },
     })).rejects.toMatchObject({ code: 'P2003' })
+  })
+
+  it('uses real MinIO multipart, idempotent complete and owner-scoped signed Range playback', async () => {
+    const owner = await login('+8613800000020')
+    const other = await login('+8613800000021')
+    const bytes = Buffer.from('echoflow-private-video-range-evidence')
+    const created = await request(app.getHttpServer())
+      .post('/api/v1/uploads')
+      .set('authorization', `Bearer ${owner.accessToken}`)
+      .send({
+        fileName: 'private-podcast.mp4', contentType: 'video/mp4', sizeBytes: bytes.length,
+        fileFingerprint: 'a'.repeat(64), rightsConfirmed: true,
+      })
+      .expect(201)
+    expect(created.body).toMatchObject({ status: 'created', partCount: 1, uploadedBytes: 0 })
+    expect(created.body.objectKey).toBeUndefined()
+    expect(created.body.providerUploadId).toBeUndefined()
+
+    const signed = await request(app.getHttpServer())
+      .post(`/api/v1/uploads/${created.body.id}/parts/sign`)
+      .set('authorization', `Bearer ${owner.accessToken}`)
+      .send({ partNumbers: [1] })
+      .expect(201)
+    const put = await fetch(signed.body.parts[0].uploadUrl, { method: 'PUT', body: bytes })
+    expect(put.status).toBe(200)
+    const etag = put.headers.get('etag')
+    expect(etag).toBeTruthy()
+
+    // Simulate a lost part-record response: object storage remains authoritative.
+    const noMissingParts = await request(app.getHttpServer())
+      .post(`/api/v1/uploads/${created.body.id}/parts/sign`)
+      .set('authorization', `Bearer ${owner.accessToken}`)
+      .send({ partNumbers: [1] })
+      .expect(201)
+    expect(noMissingParts.body.parts).toEqual([])
+    await restartApp()
+    const restoredUpload = await request(app.getHttpServer())
+      .get(`/api/v1/uploads/${created.body.id}`)
+      .set('authorization', `Bearer ${owner.accessToken}`)
+      .expect(200)
+    expect(restoredUpload.body).toMatchObject({ uploadedBytes: bytes.length, partCount: 1 })
+
+    await request(app.getHttpServer())
+      .get(`/api/v1/uploads/${created.body.id}`)
+      .set('authorization', `Bearer ${other.accessToken}`)
+      .expect(404)
+    await request(app.getHttpServer())
+      .post(`/api/v1/uploads/${created.body.id}/cancel`)
+      .set('authorization', `Bearer ${other.accessToken}`)
+      .expect(404)
+
+    const completed = await Promise.all([
+      request(app.getHttpServer()).post(`/api/v1/uploads/${created.body.id}/complete`).set('authorization', `Bearer ${owner.accessToken}`),
+      request(app.getHttpServer()).post(`/api/v1/uploads/${created.body.id}/complete`).set('authorization', `Bearer ${owner.accessToken}`),
+    ])
+    expect(completed.map((response) => response.status)).toEqual([201, 201])
+    expect(completed[0].body.mediaAssetId).toBe(completed[1].body.mediaAssetId)
+    expect(await database.mediaAsset.count()).toBe(1)
+    expect(await database.mediaObject.count()).toBe(1)
+    expect((await database.mediaObject.findFirstOrThrow()).versionId).toBeTruthy()
+    expect(await database.processingRun.count()).toBe(1)
+    expect(await database.outboxEvent.count({ where: { eventType: 'media.upload_verified' } })).toBe(1)
+
+    const repeated = await request(app.getHttpServer())
+      .post(`/api/v1/uploads/${created.body.id}/complete`)
+      .set('authorization', `Bearer ${owner.accessToken}`)
+      .expect(201)
+    expect(repeated.body.mediaAssetId).toBe(completed[0].body.mediaAssetId)
+
+    await request(app.getHttpServer())
+      .post(`/api/v1/media-assets/${completed[0].body.mediaAssetId}/playback-url`)
+      .set('authorization', `Bearer ${owner.accessToken}`)
+      .expect(409)
+    await database.mediaAsset.update({ where: { id: completed[0].body.mediaAssetId }, data: { status: 'PLAYABLE', durationMs: 1_000 } })
+
+    const denied = await request(app.getHttpServer())
+      .post(`/api/v1/media-assets/${completed[0].body.mediaAssetId}/playback-url`)
+      .set('authorization', `Bearer ${other.accessToken}`)
+      .expect(404)
+    expect(denied.body.requestId).toBeTruthy()
+
+    await database.user.update({ where: { id: other.user.id }, data: { role: UserRole.ADMIN } })
+    await request(app.getHttpServer())
+      .post(`/api/v1/media-assets/${completed[0].body.mediaAssetId}/playback-url`)
+      .set('authorization', `Bearer ${other.accessToken}`)
+      .expect(404)
+
+    const playback = await request(app.getHttpServer())
+      .post(`/api/v1/media-assets/${completed[0].body.mediaAssetId}/playback-url`)
+      .set('authorization', `Bearer ${owner.accessToken}`)
+      .expect(201)
+    const ranged = await fetch(playback.body.playbackUrl, { headers: { Range: 'bytes=0-9' } })
+    expect(ranged.status).toBe(206)
+    expect(ranged.headers.get('content-range')).toContain('bytes 0-9/')
+    expect(Buffer.from(await ranged.arrayBuffer())).toEqual(bytes.subarray(0, 10))
+    const unsignedUrl = new URL(playback.body.playbackUrl)
+    unsignedUrl.search = ''
+    expect((await fetch(unsignedUrl)).status).toBe(403)
+  })
+
+  it('rejects active-upload conflicts, incomplete manifests and expired sessions without reviving them', async () => {
+    const owner = await login('+8613800000022')
+    const sizeBytes = env.UPLOAD_PART_SIZE_BYTES + 17
+    const first = await request(app.getHttpServer())
+      .post('/api/v1/uploads')
+      .set('authorization', `Bearer ${owner.accessToken}`)
+      .send({
+        fileName: 'long.mp4', contentType: 'video/mp4', sizeBytes,
+        fileFingerprint: 'b'.repeat(64), rightsConfirmed: true,
+      })
+      .expect(201)
+
+    const conflict = await request(app.getHttpServer())
+      .post('/api/v1/uploads')
+      .set('authorization', `Bearer ${owner.accessToken}`)
+      .send({
+        fileName: 'different.mp4', contentType: 'video/mp4', sizeBytes: 10,
+        fileFingerprint: 'c'.repeat(64), rightsConfirmed: true,
+      })
+      .expect(409)
+    expect(conflict.body).toMatchObject({ code: 'upload_active_conflict' })
+
+    const signed = await request(app.getHttpServer())
+      .post(`/api/v1/uploads/${first.body.id}/parts/sign`)
+      .set('authorization', `Bearer ${owner.accessToken}`)
+      .send({ partNumbers: [1] })
+      .expect(201)
+    const part = Buffer.alloc(env.UPLOAD_PART_SIZE_BYTES, 7)
+    const put = await fetch(signed.body.parts[0].uploadUrl, { method: 'PUT', body: part })
+    const etag = put.headers.get('etag')
+    await request(app.getHttpServer())
+      .post(`/api/v1/uploads/${first.body.id}/parts/1`)
+      .set('authorization', `Bearer ${owner.accessToken}`)
+      .send({ sizeBytes: part.length, etag })
+      .expect(201)
+    const incomplete = await request(app.getHttpServer())
+      .post(`/api/v1/uploads/${first.body.id}/complete`)
+      .set('authorization', `Bearer ${owner.accessToken}`)
+      .expect(409)
+    expect(incomplete.body).toMatchObject({ code: 'upload_manifest_incomplete' })
+    const stillUploading = await request(app.getHttpServer())
+      .get(`/api/v1/uploads/${first.body.id}`)
+      .set('authorization', `Bearer ${owner.accessToken}`)
+      .expect(200)
+    expect(stillUploading.body.status).toBe('uploading')
+
+    await database.uploadSession.update({ where: { id: first.body.id }, data: { expiresAt: new Date(Date.now() - 1_000) } })
+    const expired = await request(app.getHttpServer())
+      .post(`/api/v1/uploads/${first.body.id}/parts/sign`)
+      .set('authorization', `Bearer ${owner.accessToken}`)
+      .send({ partNumbers: [2] })
+      .expect(410)
+    expect(expired.body).toMatchObject({ code: 'upload_expired' })
   })
 })

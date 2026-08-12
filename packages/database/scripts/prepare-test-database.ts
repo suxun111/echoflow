@@ -4,15 +4,18 @@ import { Client } from 'pg'
 
 async function main() {
   const databaseUrl = process.env.TEST_DATABASE_URL
-    ?? 'postgresql://online_learning:online_learning@localhost:5432/echoflow_g1_integration_test'
-  const parsed = new URL(databaseUrl)
+    ?? 'postgresql://online_learning:online_learning@localhost:5432/echoflow_g2_integration_test'
+  const requestedDatabaseName = process.argv[2]
+  const selectedUrl = new URL(databaseUrl)
+  if (requestedDatabaseName) selectedUrl.pathname = `/${requestedDatabaseName}`
+  const parsed = selectedUrl
   const databaseName = parsed.pathname.slice(1)
 
   if (!/^echoflow_[A-Za-z0-9_]+_test$/.test(databaseName)) {
     throw new Error(`Refusing to prepare non-test database: ${databaseName}`)
   }
 
-  const adminUrl = new URL(databaseUrl)
+  const adminUrl = new URL(selectedUrl)
   adminUrl.pathname = '/postgres'
   const admin = new Client({ connectionString: adminUrl.toString() })
 
@@ -31,7 +34,7 @@ async function main() {
     [prismaCli, 'migrate', 'deploy', '--schema', schemaPath],
     {
       cwd: resolve(__dirname, '..'),
-      env: { ...process.env, DATABASE_URL: databaseUrl },
+      env: { ...process.env, DATABASE_URL: selectedUrl.toString() },
       encoding: 'utf8',
       stdio: 'inherit',
     },

@@ -46,6 +46,14 @@ export const ApiErrorCodeSchema = z.enum([
   'rate_limited',
   'internal_error',
   'service_unavailable',
+  'upload_active_conflict',
+  'upload_expired',
+  'upload_part_invalid',
+  'upload_manifest_incomplete',
+  'upload_object_mismatch',
+  'media_format_unsupported',
+  'media_not_playable',
+  'storage_unavailable',
 ])
 export const ApiErrorSchema = z.object({
   code: ApiErrorCodeSchema,
@@ -63,6 +71,75 @@ export const PrivateLessonSchema = z.object({
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 })
+
+export const MAX_UPLOAD_BYTES = 8 * 1024 * 1024 * 1024
+export const DEFAULT_UPLOAD_PART_SIZE_BYTES = 32 * 1024 * 1024
+
+export const CreateUploadSchema = z.object({
+  fileName: z.string().trim().min(1).max(512).refine((value) => value.toLowerCase().endsWith('.mp4'), '只支持 MP4 文件'),
+  contentType: z.literal('video/mp4'),
+  sizeBytes: z.number().int().positive().max(MAX_UPLOAD_BYTES),
+  fileFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+  rightsConfirmed: z.literal(true),
+  title: z.string().trim().min(1).max(300).optional(),
+}).strict()
+
+export const UploadPartSchema = z.object({
+  partNumber: z.number().int().positive().max(10_000),
+  sizeBytes: z.number().int().positive(),
+  etag: z.string().trim().min(1).max(512),
+}).strict()
+
+export const SignUploadPartsSchema = z.object({
+  partNumbers: z.array(z.number().int().positive().max(10_000)).min(1).max(20)
+    .refine((values) => new Set(values).size === values.length, '分片编号不能重复'),
+}).strict()
+
+export const UploadPartViewSchema = UploadPartSchema.extend({ completedAt: z.string().datetime() })
+
+export const UploadSessionViewSchema = z.object({
+  id: IdSchema,
+  status: UploadStatusSchema,
+  originalName: z.string(),
+  title: z.string(),
+  contentType: z.literal('video/mp4'),
+  sizeBytes: z.number().int().positive(),
+  fileFingerprint: z.string().nullable(),
+  partSizeBytes: z.number().int().positive(),
+  partCount: z.number().int().positive(),
+  expiresAt: z.string().datetime(),
+  completedAt: z.string().datetime().nullable(),
+  uploadedBytes: z.number().int().nonnegative(),
+  parts: z.array(UploadPartViewSchema),
+  mediaAssetId: IdSchema.nullable(),
+}).strict()
+
+export const SignedUploadPartSchema = z.object({
+  partNumber: z.number().int().positive(),
+  uploadUrl: z.string().url(),
+  expiresAt: z.string().datetime(),
+}).strict()
+
+export const SignedUploadPartsResponseSchema = z.object({ parts: z.array(SignedUploadPartSchema) }).strict()
+
+export const MediaAssetViewSchema = z.object({
+  id: IdSchema,
+  uploadSessionId: IdSchema.nullable(),
+  title: z.string(),
+  originalName: z.string(),
+  status: MediaAssetStatusSchema,
+  durationMs: z.number().int().positive().nullable(),
+  processingStage: ProcessingStageSchema.nullable(),
+  errorCode: z.string().nullable(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+}).strict()
+
+export const PlaybackUrlSchema = z.object({
+  mediaAssetId: IdSchema,
+  playbackUrl: z.string().url(),
+  expiresAt: z.string().datetime(),
+}).strict()
 
 // Legacy prototype contracts remain temporarily so Web/Worker continue to compile.
 // They are not mounted as V1 API routes and will be removed in their owning Gates.
@@ -94,9 +171,7 @@ export const VideoQuerySchema = z.object({
 export const ProgressUpdateSchema = z.object({
   lessonId: z.string().min(1), currentCueId: z.string().min(1).optional(), completedCueIds: z.array(z.string().min(1)), positionMs: z.number().int().nonnegative(),
 })
-export const UploadRequestSchema = z.object({
-  fileName: z.string().min(1), contentType: z.literal('video/mp4'), sizeBytes: z.number().int().positive().max(8 * 1024 * 1024 * 1024), rightsConfirmed: z.literal(true),
-})
+export const UploadRequestSchema = CreateUploadSchema
 export const ProcessingJobSchema = z.object({
   id: z.string().min(1), uploadId: z.string().min(1), type: JobTypeSchema, status: JobStatusSchema,
   progress: z.number().min(0).max(100), error: z.string().nullable(), updatedAt: z.string().datetime(),
@@ -107,6 +182,13 @@ export type AuthUser = z.infer<typeof AuthUserSchema>
 export type AccessSession = z.infer<typeof AccessSessionSchema>
 export type ApiError = z.infer<typeof ApiErrorSchema>
 export type PrivateLesson = z.infer<typeof PrivateLessonSchema>
+export type CreateUpload = z.infer<typeof CreateUploadSchema>
+export type UploadPart = z.infer<typeof UploadPartSchema>
+export type UploadPartView = z.infer<typeof UploadPartViewSchema>
+export type SignUploadParts = z.infer<typeof SignUploadPartsSchema>
+export type UploadSessionView = z.infer<typeof UploadSessionViewSchema>
+export type MediaAssetView = z.infer<typeof MediaAssetViewSchema>
+export type PlaybackUrl = z.infer<typeof PlaybackUrlSchema>
 export type SubtitleCue = z.infer<typeof SubtitleCueSchema>
 export type VideoSummary = z.infer<typeof VideoSummarySchema>
 export type LessonDetail = z.infer<typeof LessonDetailSchema>

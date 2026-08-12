@@ -6,12 +6,15 @@
   "scripts": {
     "dev": "tsx watch src/main.ts",
     "build": "tsc -p tsconfig.json",
+    "pretest": "pnpm --filter @online-learning/database exec tsx scripts/prepare-test-database.ts echoflow_g2_worker_test",
     "test": "vitest run",
     "lint": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@online-learning/config": "workspace:*",
     "@online-learning/contracts": "workspace:*",
+    "@online-learning/database": "workspace:*",
+    "@online-learning/storage": "workspace:*",
     "bullmq": "^5.56.2",
     "ioredis": "^5.6.1"
   },

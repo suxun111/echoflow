@@ -161,6 +161,12 @@ importers:
       '@online-learning/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@online-learning/database':
+        specifier: workspace:*
+        version: link:../../packages/database
+      '@online-learning/storage':
+        specifier: workspace:*
+        version: link:../../packages/storage
       bullmq:
         specifier: ^5.56.2
         version: 5.80.5

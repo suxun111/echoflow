@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
-  AccessSessionSchema, ApiErrorSchema, MediaAssetStatusSchema, OtpRequestSchema,
-  ProcessingStageSchema, ProcessingStatusSchema, TranscriptStatusSchema,
+  AccessSessionSchema, ApiErrorSchema, CreateUploadSchema, DEFAULT_UPLOAD_PART_SIZE_BYTES,
+  MAX_UPLOAD_BYTES, MediaAssetStatusSchema, OtpRequestSchema, ProcessingStageSchema,
+  ProcessingStatusSchema, SignUploadPartsSchema, TranscriptStatusSchema,
 } from './index'
 
 describe('G1 contracts', () => {
@@ -31,5 +32,18 @@ describe('G1 contracts', () => {
       'merging', 'cue_segmenting', 'validating', 'transcript_ready', 'course_ready',
     ])
     expect(TranscriptStatusSchema.options).toEqual(['building', 'active', 'superseded', 'rejected'])
+  })
+
+  it('freezes the G2 MP4, 8 GiB and multipart boundaries', () => {
+    const valid = {
+      fileName: 'two-hour-podcast.mp4', contentType: 'video/mp4' as const,
+      sizeBytes: MAX_UPLOAD_BYTES, fileFingerprint: 'a'.repeat(64), rightsConfirmed: true as const,
+    }
+    expect(CreateUploadSchema.parse(valid).sizeBytes).toBe(MAX_UPLOAD_BYTES)
+    expect(DEFAULT_UPLOAD_PART_SIZE_BYTES).toBe(33_554_432)
+    expect(Math.ceil(MAX_UPLOAD_BYTES / DEFAULT_UPLOAD_PART_SIZE_BYTES)).toBe(256)
+    expect(() => CreateUploadSchema.parse({ ...valid, sizeBytes: MAX_UPLOAD_BYTES + 1 })).toThrow()
+    expect(() => CreateUploadSchema.parse({ ...valid, fileName: 'podcast.mov' })).toThrow()
+    expect(() => SignUploadPartsSchema.parse({ partNumbers: [1, 1] })).toThrow()
   })
 })
