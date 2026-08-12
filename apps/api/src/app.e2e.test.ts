@@ -1,4 +1,7 @@
 import 'reflect-metadata'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import type { INestApplication } from '@nestjs/common'
 import { UserRole } from '@online-learning/database'
 import { MinioStorageProvider } from '@online-learning/storage'
@@ -432,6 +435,20 @@ describe('EchoFlow real PostgreSQL, auth, upload and owner boundary', () => {
       .set('authorization', `Bearer ${other.accessToken}`)
       .expect(404)
     await request(app.getHttpServer())
+      .post(`/api/v1/uploads/${created.body.id}/parts/sign`)
+      .set('authorization', `Bearer ${other.accessToken}`)
+      .send({ partNumbers: [1] })
+      .expect(404)
+    await request(app.getHttpServer())
+      .post(`/api/v1/uploads/${created.body.id}/parts/1`)
+      .set('authorization', `Bearer ${other.accessToken}`)
+      .send({ sizeBytes: bytes.length, etag })
+      .expect(404)
+    await request(app.getHttpServer())
+      .post(`/api/v1/uploads/${created.body.id}/complete`)
+      .set('authorization', `Bearer ${other.accessToken}`)
+      .expect(404)
+    await request(app.getHttpServer())
       .post(`/api/v1/uploads/${created.body.id}/cancel`)
       .set('authorization', `Bearer ${other.accessToken}`)
       .expect(404)
@@ -506,6 +523,68 @@ describe('EchoFlow real PostgreSQL, auth, upload and owner boundary', () => {
     const unsignedUrl = new URL(playback.body.playbackUrl)
     unsignedUrl.search = ''
     expect((await fetch(unsignedUrl)).status).toBe(403)
+  })
+
+  it('recovers after provider completion without a database commit and rejects missing or mismatched objects', async () => {
+    async function createUpload(phone: string, fingerprint: string, bytes: Buffer) {
+      const owner = await login(phone)
+      const created = await request(app.getHttpServer())
+        .post('/api/v1/uploads')
+        .set('authorization', `Bearer ${owner.accessToken}`)
+        .send({
+          fileName: 'recovery.mp4', contentType: 'video/mp4', sizeBytes: bytes.length,
+          fileFingerprint: fingerprint.repeat(64), rightsConfirmed: true,
+        })
+        .expect(201)
+      const upload = await database.uploadSession.findUniqueOrThrow({ where: { id: created.body.id } })
+      return { owner, created, upload }
+    }
+
+    const crashBytes = Buffer.from('provider-completed-before-api-commit')
+    const crash = await createUpload('+8613800000023', 'd', crashBytes)
+    const crashUrl = await minio.createPartUploadUrl(crash.upload.objectKey, crash.upload.providerUploadId!, 1, 900)
+    expect((await fetch(crashUrl, { method: 'PUT', body: crashBytes })).status).toBe(200)
+    const crashParts = await minio.listMultipartParts(crash.upload.objectKey, crash.upload.providerUploadId!)
+    await minio.completeMultipartUpload(crash.upload.objectKey, crash.upload.providerUploadId!, crashParts)
+
+    // The object provider has committed, but no API transaction has run: this is the durable state after an API crash.
+    await restartApp()
+    const recovered = await request(app.getHttpServer())
+      .post(`/api/v1/uploads/${crash.created.body.id}/complete`)
+      .set('authorization', `Bearer ${crash.owner.accessToken}`)
+      .expect(201)
+    expect(recovered.body.mediaAssetId).toBeTruthy()
+    expect(await database.mediaAsset.count({ where: { uploadSessionId: crash.created.body.id } })).toBe(1)
+    expect(await database.outboxEvent.count({ where: { aggregateId: recovered.body.mediaAssetId, eventType: 'media.upload_verified' } })).toBe(1)
+
+    const missing = await createUpload('+8613800000024', 'e', Buffer.from('missing-object'))
+    await minio.abortMultipartUpload(missing.upload.objectKey, missing.upload.providerUploadId!)
+    const missingResponse = await request(app.getHttpServer())
+      .post(`/api/v1/uploads/${missing.created.body.id}/complete`)
+      .set('authorization', `Bearer ${missing.owner.accessToken}`)
+      .expect(503)
+    expect(missingResponse.body).toMatchObject({ code: 'storage_unavailable' })
+    expect(await database.mediaAsset.count({ where: { uploadSessionId: missing.created.body.id } })).toBe(0)
+
+    const mismatchBytes = Buffer.from('expected-object-size')
+    const mismatch = await createUpload('+8613800000025', 'f', mismatchBytes)
+    await minio.abortMultipartUpload(mismatch.upload.objectKey, mismatch.upload.providerUploadId!)
+    const directory = await mkdtemp(join(tmpdir(), 'echoflow-g2-object-mismatch-'))
+    const wrongPath = join(directory, 'wrong.mp4')
+    const wrongBytes = Buffer.concat([mismatchBytes, Buffer.from('-wrong-size')])
+    await writeFile(wrongPath, wrongBytes)
+    const wrongObject = await minio.uploadFile(mismatch.upload.objectKey, wrongPath, 'video/mp4')
+    try {
+      const mismatchResponse = await request(app.getHttpServer())
+        .post(`/api/v1/uploads/${mismatch.created.body.id}/complete`)
+        .set('authorization', `Bearer ${mismatch.owner.accessToken}`)
+        .expect(422)
+      expect(mismatchResponse.body).toMatchObject({ code: 'upload_object_mismatch' })
+      expect(await database.mediaAsset.count({ where: { uploadSessionId: mismatch.created.body.id } })).toBe(0)
+    } finally {
+      await minio.remove(mismatch.upload.objectKey, wrongObject.versionId).catch(() => undefined)
+      await rm(directory, { recursive: true, force: true })
+    }
   })
 
   it('rejects active-upload conflicts, incomplete manifests and expired sessions without reviving them', async () => {

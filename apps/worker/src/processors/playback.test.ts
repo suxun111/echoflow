@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process'
+import { execFile, spawn, type ChildProcess } from 'node:child_process'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -230,6 +230,76 @@ describe('G2 real playback preparation', () => {
     await expect(recovered({ mediaAssetId: asset.id, processingRunId: run.id })).resolves.toMatchObject({ failed: false })
     expect(await database.processingRun.findUniqueOrThrow({ where: { id: run.id } })).toMatchObject({ status: 'SUCCEEDED', stage: 'PLAYBACK_READY' })
   })
+
+  it('recovers the same BullMQ job after an actual worker process is killed and restarted', async () => {
+    const { asset, run } = await createRun('11')
+    const connection = new IORedis('redis://localhost:6379', { maxRetriesPerRequest: null })
+    const queueName = `echoflow-g2-restart-${crypto.randomUUID()}`
+    const queue = new Queue(queueName, { connection })
+    const children: ChildProcess[] = []
+    const workerRoot = join(__dirname, '..', '..')
+    const fixture = join('src', 'test-fixtures', 'restart-worker-child.ts')
+    const tsxCli = require.resolve('tsx/cli')
+    const childEnvironment = {
+      ...process.env,
+      DATABASE_URL: 'postgresql://online_learning:online_learning@localhost:5432/echoflow_g2_worker_test',
+      REDIS_URL: 'redis://localhost:6379',
+      MINIO_ENDPOINT: 'localhost', MINIO_PORT: '9000',
+      MINIO_ACCESS_KEY: 'online_learning', MINIO_SECRET_KEY: 'online_learning_secret',
+      MINIO_BUCKET: 'echoflow-g2-worker-test',
+      G2_TEST_QUEUE_NAME: queueName, FFPROBE_PATH: 'ffprobe', FFMPEG_PATH: 'ffmpeg',
+    }
+    const startChild = (hang: boolean) => {
+      const child = spawn(process.execPath, [tsxCli, fixture], {
+        cwd: workerRoot, windowsHide: true,
+        env: { ...childEnvironment, G2_TEST_HANG_PROBE: String(hang) },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      })
+      children.push(child)
+      return child
+    }
+    const stopChild = async (child: ChildProcess) => {
+      if (child.exitCode !== null || child.signalCode !== null) return
+      const exited = new Promise<void>((resolve) => child.once('exit', () => resolve()))
+      if (process.platform === 'win32' && child.pid) {
+        await execFileAsync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true }).catch(() => undefined)
+      } else child.kill('SIGKILL')
+      const stopped = await Promise.race([exited.then(() => true), new Promise<false>((resolve) => setTimeout(() => resolve(false), 5_000))])
+      if (!stopped) {
+        throw new Error('worker_child_failed_to_exit')
+      }
+    }
+    const waitForRun = async (predicate: (status: string, stage: string) => boolean, timeoutMs = 20_000) => {
+      const deadline = Date.now() + timeoutMs
+      while (Date.now() < deadline) {
+        const current = await database.processingRun.findUniqueOrThrow({ where: { id: run.id } })
+        if (predicate(current.status, current.stage)) return current
+        await new Promise((resolve) => setTimeout(resolve, 100))
+      }
+      throw new Error('worker_restart_state_timeout')
+    }
+    try {
+      await queue.add('media.upload_verified', { mediaAssetId: asset.id, processingRunId: run.id }, {
+        jobId: `processing-${run.id}-0`, attempts: 1,
+      })
+      const first = startChild(true)
+      await waitForRun((status, stage) => status === 'PROCESSING' && stage === 'PROBING')
+      await stopChild(first)
+      await database.processingRun.update({ where: { id: run.id }, data: { leaseExpiresAt: new Date(Date.now() - 1_000) } })
+
+      const replacement = startChild(false)
+      const completed = await waitForRun((status, stage) => status === 'SUCCEEDED' && stage === 'PLAYBACK_READY')
+      expect(completed.leaseOwner).toBeNull()
+      expect(await database.mediaAsset.findUniqueOrThrow({ where: { id: asset.id } })).toMatchObject({ status: 'PLAYABLE' })
+      expect(await database.outboxEvent.count({ where: { aggregateId: asset.id, eventType: 'media.playback_ready' } })).toBe(1)
+      await stopChild(replacement)
+    } finally {
+      await Promise.all(children.map((child) => stopChild(child)))
+      await queue.obliterate({ force: true }).catch(() => undefined)
+      await queue.close()
+      await connection.quit()
+    }
+  }, 60_000)
 
   it('fences a worker that loses its database lease before publishing playback', async () => {
     const { asset, run } = await createRun('8')
