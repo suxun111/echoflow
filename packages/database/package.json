@@ -13,7 +13,7 @@
   },
   "scripts": {
     "generate": "prisma generate",
-    "build": "tsc -p tsconfig.json",
+    "build": "prisma generate && tsc -p tsconfig.json",
     "test": "vitest run",
     "lint": "tsc -p tsconfig.json --noEmit",
     "migrate": "tsx scripts/run-migration.ts dev",

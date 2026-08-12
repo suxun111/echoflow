@@ -49,4 +49,9 @@ describe('V1 Prisma baseline', () => {
     expect(runner).toContain("databaseName === 'online_learning'")
     expect(runner).toContain('Refusing to migrate protected legacy database')
   })
+
+  it('generates the Prisma Client before compiling a fresh workspace', () => {
+    const packageJson = JSON.parse(readFileSync(resolve(__dirname, '../package.json'), 'utf8')) as { scripts: Record<string, string> }
+    expect(packageJson.scripts.build).toBe('prisma generate && tsc -p tsconfig.json')
+  })
 })
