@@ -9,16 +9,17 @@
 | 字段 | 当前值 |
 |---|---|
 | Goal | `v0.5.0-alpha.1` |
-| Gate | `G1 契约、数据库、身份和安全` 已关闭；`G2` 未开始 |
+| Gate | `G1 契约、数据库、身份和安全` 已关闭；`G2 长视频上传与可播放资产` 已开始 |
 | 唯一 trunk | `master` |
 | V1 产品代码审计源点 | `42968ad` |
 | G0 文档基线 | `d01c67e`，已 fast-forward 至 master |
 | fresh-clone 修复 | `0e3c912`，已 fast-forward 至 master；来源分支为 `codex/g0-fresh-clone-topology-20260811` |
 | G1 实施分支 | `codex/g1-contract-database-auth-20260812`；最终代码锚点 `4bfaaba` |
-| WIP | 无核心纵向闭环在集成；等待确认 G2 任务合同 |
-| 产品功能开发 | G1 已关闭；G2–G5 在新任务合同确认前冻结 |
+| G2 实施分支 | `codex/g2-long-video-upload-playback-20260812`；任务合同见 `docs/G2-TASK-CONTRACT.md` |
+| WIP | G2 长视频上传、对象校验与签名播放纵向闭环 |
+| 产品功能开发 | G2 已获用户确认并进入实施；G3–G5 继续冻结 |
 | Remote | `origin = https://github.com/suxun111/echoflow.git`；Private；外部恢复验证通过 |
-| 下一人工边界 | 复盘并确认 G2“长视频上传与可播放资产”任务合同 |
+| 下一人工边界 | G2 最终证据与 Reviewer 通过后，复盘是否关闭 G2 |
 
 ## 2026-08-11 决策澄清
 
@@ -93,7 +94,8 @@
 ## 当前进行中
 
 - G1 已按 [验证证据](G1-VERIFICATION-EVIDENCE.md) 关闭；
-- G2 尚未建立任务合同，不开始 Multipart、对象签名或可播放资产实现。
+- G2 已冻结 [任务合同](G2-TASK-CONTRACT.md)，正在实现真实 Multipart、7 天续传、对象校验、媒体探测与 owner-scoped 签名播放；
+- 本 Gate 不接入 MOSS、不生成字幕、不进入 G3。
 
 ## G1 关闭证据
 
