@@ -1,3 +1,21 @@
+export {
+  PrismaClient,
+  Prisma,
+  UserRole,
+  UserStatus,
+  OtpPurpose,
+  SourceType,
+  UploadStatus,
+  MediaAssetStatus,
+  MediaObjectKind,
+  ProcessingStatus,
+  ProcessingStage,
+  OutboxStatus,
+  TranscriptStatus,
+  LessonStatus,
+} from '@prisma/client'
+export type { User } from '@prisma/client'
+
 export const databasePackage = {
   provider: 'postgresql',
   schemaPath: 'packages/database/prisma/schema.prisma',
@@ -8,6 +26,6 @@ export type DatabaseReadiness = { configured: boolean; provider: 'postgresql'; m
 
 export function getDatabaseReadiness(databaseUrl = process.env.DATABASE_URL): DatabaseReadiness {
   return databaseUrl
-    ? { configured: true, provider: 'postgresql', message: 'DATABASE_URL is configured; run db:generate before database access.' }
+    ? { configured: true, provider: 'postgresql', message: 'DATABASE_URL is configured.' }
     : { configured: false, provider: 'postgresql', message: 'DATABASE_URL is missing.' }
 }

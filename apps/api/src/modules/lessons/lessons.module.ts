@@ -1,14 +1,38 @@
-import { Controller, Get, Module, Param } from '@nestjs/common'
+import { Controller, Get, Inject, Injectable, Module, Param } from '@nestjs/common'
+import { PrivateLessonSchema } from '@online-learning/contracts'
+import { ApiException } from '../../common/api-exception'
+import { CurrentUser } from '../../common/auth.decorators'
+import { DatabaseService } from '../../database/database.module'
+import type { AuthenticatedUser } from '../auth/auth.types'
 
-const cues = [
-  { id: 'cue-1', startMs: 2000, endMs: 5000, english: 'Welcome back to another slow English video.', chinese: '欢迎回到又一期慢速英语视频。', keywords: ['welcome', 'slow English'], reviewed: true },
-  { id: 'cue-2', startMs: 5000, endMs: 9000, english: 'Today, I am taking you around my little coastal town.', chinese: '今天，我会带你逛逛我居住的海滨小镇。', keywords: ['coastal town'], reviewed: true },
-]
+@Injectable()
+export class LessonsService {
+  constructor(@Inject(DatabaseService) private readonly database: DatabaseService) {}
+
+  async getOwned(lessonId: string, ownerId: string) {
+    const lesson = await this.database.privateLesson.findFirst({ where: { id: lessonId, ownerId } })
+    if (!lesson) throw new ApiException(404, 'not_found', '学习内容不存在')
+    return PrivateLessonSchema.parse({
+      id: lesson.id,
+      title: lesson.title,
+      status: lesson.status.toLowerCase(),
+      mediaAssetId: lesson.mediaAssetId,
+      transcriptVersionId: lesson.transcriptVersionId,
+      createdAt: lesson.createdAt.toISOString(),
+      updatedAt: lesson.updatedAt.toISOString(),
+    })
+  }
+}
 
 @Controller('lessons')
 export class LessonsController {
-  @Get(':id') get(@Param('id') id: string) { return { id, title: '英国海滨小镇的一天', subtitle: 'Life in a British Coastal Town', creator: 'Evie English', level: 'A2', category: '旅行', accent: '英音', durationSeconds: 522, coverUrl: 'https://images.unsplash.com/photo-1513635269975-59663e0ac1ad?auto=format&fit=crop&w=1200&q=85', published: true, description: '跟随慢速英语漫步英国海滨小镇。', playbackUrl: null, cues } }
+  constructor(@Inject(LessonsService) private readonly lessons: LessonsService) {}
+
+  @Get(':lessonId')
+  get(@Param('lessonId') lessonId: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.lessons.getOwned(lessonId, user.id)
+  }
 }
 
-@Module({ controllers: [LessonsController] })
+@Module({ controllers: [LessonsController], providers: [LessonsService] })
 export class LessonsModule {}

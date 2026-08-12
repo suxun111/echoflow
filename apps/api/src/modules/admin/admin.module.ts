@@ -1,11 +1,21 @@
-import { Body, Controller, Get, Module, Param, Post } from '@nestjs/common'
-import { AdminReviewSchema } from '@online-learning/contracts'
+import { Controller, Get, Inject, Module } from '@nestjs/common'
+import { Roles } from '../../common/auth.decorators'
+import { DatabaseService } from '../../database/database.module'
 
+@Roles('admin')
 @Controller('admin')
 export class AdminController {
-  @Get('candidates') candidates() { return [{ id: 'candidate-1', title: 'Slow Travel English', source: 'YouTube metadata', status: 'rights_review' }] }
-  @Post('assets/:id/review') review(@Param('id') id: string, @Body() input: unknown) { return { assetId: id, ...AdminReviewSchema.parse(input), reviewedAt: new Date().toISOString() } }
-  @Post('lessons/:id/publish') publish(@Param('id') id: string) { return { lessonId: id, status: 'published', publishedAt: new Date().toISOString() } }
+  constructor(@Inject(DatabaseService) private readonly database: DatabaseService) {}
+
+  @Get('audit-events')
+  async auditEvents() {
+    const events = await this.database.auditEvent.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+      select: { id: true, action: true, resourceType: true, resourceId: true, requestId: true, createdAt: true },
+    })
+    return { items: events.map((event) => ({ ...event, createdAt: event.createdAt.toISOString() })) }
+  }
 }
 
 @Module({ controllers: [AdminController] })

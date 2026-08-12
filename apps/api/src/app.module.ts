@@ -1,14 +1,22 @@
-import { Module } from '@nestjs/common'
-import { HealthModule } from './modules/health/health.module'
-import { AuthModule } from './modules/auth/auth.module'
-import { UsersModule } from './modules/users/users.module'
-import { VideosModule } from './modules/videos/videos.module'
-import { LessonsModule } from './modules/lessons/lessons.module'
-import { SubtitlesModule } from './modules/subtitles/subtitles.module'
-import { ProgressModule } from './modules/progress/progress.module'
-import { UploadsModule } from './modules/uploads/uploads.module'
-import { JobsModule } from './modules/jobs/jobs.module'
+import { DynamicModule, Module } from '@nestjs/common'
+import { APP_GUARD } from '@nestjs/core'
+import type { ServerEnv } from '@online-learning/config'
+import { AuthGuard } from './common/auth.guard'
+import { AppConfigModule } from './config/app-config.module'
+import { DatabaseModule } from './database/database.module'
 import { AdminModule } from './modules/admin/admin.module'
+import { AuthModule } from './modules/auth/auth.module'
+import { HealthModule } from './modules/health/health.module'
+import { LessonsModule } from './modules/lessons/lessons.module'
+import { UsersModule } from './modules/users/users.module'
 
-@Module({ imports: [HealthModule, AuthModule, UsersModule, VideosModule, LessonsModule, SubtitlesModule, ProgressModule, UploadsModule, JobsModule, AdminModule] })
-export class AppModule {}
+@Module({})
+export class AppModule {
+  static register(env: ServerEnv): DynamicModule {
+    return {
+      module: AppModule,
+      imports: [AppConfigModule.forRoot(env), DatabaseModule, HealthModule, AuthModule, UsersModule, LessonsModule, AdminModule],
+      providers: [{ provide: APP_GUARD, useClass: AuthGuard }],
+    }
+  }
+}

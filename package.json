@@ -7,10 +7,12 @@
     "build:workspace-packages": "pnpm --filter=./packages/* --if-present build",
     "dev": "pnpm run build:workspace-packages && pnpm --parallel --filter=./apps/* dev",
     "build": "pnpm -r --if-present build",
-    "test": "pnpm run build:workspace-packages && pnpm -r --if-present test",
+    "test": "pnpm run build:workspace-packages && pnpm run db:test:prepare && pnpm -r --if-present test",
     "lint": "pnpm run build:workspace-packages && pnpm -r --if-present lint",
     "db:generate": "pnpm --filter @online-learning/database generate",
     "db:migrate": "pnpm --filter @online-learning/database migrate",
+    "db:migrate:deploy": "pnpm --filter @online-learning/database migrate:deploy",
+    "db:test:prepare": "pnpm --filter @online-learning/database test:prepare",
     "db:seed": "pnpm --filter @online-learning/database seed",
     "infra:up": "docker compose -f infrastructure/docker-compose.yml up -d",
     "infra:down": "docker compose -f infrastructure/docker-compose.yml down"

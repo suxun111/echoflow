@@ -9,194 +9,396 @@ datasource db {
 
 enum UserRole {
   LEARNER
-  EDITOR
   ADMIN
 }
 
-enum AssetStatus {
-  CANDIDATE
-  RIGHTS_REVIEW
-  APPROVED
-  PROCESSING
-  READY
-  PUBLISHED
-  REJECTED
-  ARCHIVED
+enum UserStatus {
+  ACTIVE
+  DISABLED
+  DELETED
 }
 
-enum ReviewDecision {
-  APPROVED
-  REJECTED
-  CHANGES_REQUESTED
+enum OtpPurpose {
+  LOGIN
 }
 
-enum JobType {
-  TRANSCODE
-  TRANSCRIBE
-  TRANSLATE
-  SEGMENT
-  PUBLISH
+enum SourceType {
+  PERSONAL
+  WORKFLOW
 }
 
-enum JobStatus {
-  QUEUED
-  PROCESSING
-  REVIEW
+enum UploadStatus {
+  CREATED
+  UPLOADING
+  VERIFYING
   COMPLETED
+  ABORTED
+  EXPIRED
   FAILED
 }
 
+enum MediaAssetStatus {
+  UPLOADED
+  PROCESSING
+  READY
+  FAILED
+  DELETING
+  DELETED
+}
+
+enum MediaObjectKind {
+  ORIGINAL
+  PLAYBACK
+  NORMALIZED_AUDIO
+  AUDIO_CHUNK
+  ASR_RAW
+}
+
+enum ProcessingStatus {
+  QUEUED
+  CLAIMED
+  WAITING_DEPENDENCY
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELED
+}
+
+enum ProcessingStage {
+  VERIFY_MEDIA
+  EXTRACT_AUDIO
+  TRANSCRIBE
+  MERGE_TRANSCRIPT
+  PUBLISH
+}
+
+enum OutboxStatus {
+  PENDING
+  PUBLISHED
+  FAILED
+}
+
+enum TranscriptStatus {
+  DRAFT
+  READY
+  REJECTED
+}
+
+enum LessonStatus {
+  PROCESSING
+  READY
+  ARCHIVED
+}
+
 model User {
-  id             String             @id @default(cuid())
-  phone          String             @unique
-  displayName    String
-  role           UserRole           @default(LEARNER)
-  createdAt      DateTime           @default(now())
-  updatedAt      DateTime           @updatedAt
-  progresses     LearningProgress[]
-  favorites      Favorite[]
-  vocabulary     VocabularyItem[]
-  recordings     Recording[]
-  uploads        Upload[]
-  reviews        AuthorizationReview[]
+  id                 String              @id @default(uuid()) @db.Uuid
+  phone              String              @unique @db.VarChar(32)
+  displayName        String              @db.VarChar(120)
+  role               UserRole            @default(LEARNER)
+  status             UserStatus          @default(ACTIVE)
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  deletedAt          DateTime?
+  refreshSessions    RefreshSession[]
+  uploadSessions     UploadSession[]
+  mediaAssets        MediaAsset[]
+  privateLessons     PrivateLesson[]
+  learningProgresses LearningProgress[]
+  auditEvents        AuditEvent[]        @relation("AuditActor")
+  idempotencyRecords IdempotencyRecord[]
+  processingRuns     ProcessingRun[]
+
+  @@index([status])
+  @@index([role])
 }
 
-model VideoAsset {
-  id             String                @id @default(cuid())
-  sourcePlatform String?
-  sourceUrl      String?
-  title          String
-  creator        String
-  coverUrl       String
-  storageKey     String?
-  durationMs     Int
-  category       String
-  accent         String
-  level          String
-  status         AssetStatus           @default(CANDIDATE)
-  rightsNote     String?
-  createdAt      DateTime              @default(now())
-  updatedAt      DateTime              @updatedAt
-  lesson         Lesson?
-  reviews        AuthorizationReview[]
-  uploads        Upload[]
+model OtpChallenge {
+  id          String     @id @default(uuid()) @db.Uuid
+  phone       String     @db.VarChar(32)
+  purpose     OtpPurpose @default(LOGIN)
+  codeHash    String     @db.Char(64)
+  expiresAt   DateTime
+  consumedAt  DateTime?
+  attempts    Int        @default(0)
+  maxAttempts Int        @default(5)
+  requestId   String?    @db.VarChar(128)
+  createdAt   DateTime   @default(now())
+
+  @@index([phone, purpose, createdAt])
+  @@index([expiresAt])
 }
 
-model AuthorizationReview {
-  id          String         @id @default(cuid())
-  assetId     String
-  reviewerId  String
-  decision    ReviewDecision
-  note        String         @default("")
-  createdAt   DateTime       @default(now())
-  asset       VideoAsset     @relation(fields: [assetId], references: [id], onDelete: Cascade)
-  reviewer    User           @relation(fields: [reviewerId], references: [id])
+model RefreshSession {
+  id              String          @id @default(uuid()) @db.Uuid
+  userId          String          @db.Uuid
+  familyId        String          @db.Uuid
+  tokenHash       String          @unique @db.Char(64)
+  expiresAt       DateTime
+  rotatedAt       DateTime?
+  revokedAt       DateTime?
+  replacedById    String?         @unique @db.Uuid
+  lastUsedAt      DateTime?
+  userAgentHash   String?         @db.Char(64)
+  ipHash          String?         @db.Char(64)
+  createdAt       DateTime        @default(now())
+  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  replacement     RefreshSession? @relation("RefreshRotation", fields: [replacedById], references: [id], onDelete: SetNull)
+  replacedSession RefreshSession? @relation("RefreshRotation")
+
+  @@index([userId, expiresAt])
+  @@index([familyId])
 }
 
-model Lesson {
-  id          String             @id @default(cuid())
-  videoId     String             @unique
-  title       String
-  description String             @default("")
-  publishedAt DateTime?
-  video       VideoAsset         @relation(fields: [videoId], references: [id], onDelete: Cascade)
-  cues        SubtitleCue[]
-  progresses  LearningProgress[]
-  favorites   Favorite[]
-  vocabulary  VocabularyItem[]
-  recordings  Recording[]
+model UploadSession {
+  id               String       @id @default(uuid()) @db.Uuid
+  ownerId          String       @db.Uuid
+  sourceType       SourceType   @default(PERSONAL)
+  status           UploadStatus @default(CREATED)
+  originalName     String       @db.VarChar(512)
+  contentType      String       @db.VarChar(128)
+  sizeBytes        BigInt
+  objectKey        String       @unique @db.VarChar(1024)
+  providerUploadId String?      @db.VarChar(512)
+  partSizeBytes    BigInt
+  expiresAt        DateTime
+  completedAt      DateTime?
+  abortedAt        DateTime?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  owner            User         @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  parts            UploadPart[]
+  mediaAsset       MediaAsset?
+
+  @@index([ownerId, status])
+  @@index([expiresAt])
+}
+
+model UploadPart {
+  id              String        @id @default(uuid()) @db.Uuid
+  uploadSessionId String        @db.Uuid
+  partNumber      Int
+  sizeBytes       BigInt
+  etag            String        @db.VarChar(512)
+  checksumSha256  String?       @db.Char(64)
+  createdAt       DateTime      @default(now())
+  uploadSession   UploadSession @relation(fields: [uploadSessionId], references: [id], onDelete: Cascade)
+
+  @@unique([uploadSessionId, partNumber])
+}
+
+model MediaAsset {
+  id                 String              @id @default(uuid()) @db.Uuid
+  ownerId            String              @db.Uuid
+  uploadSessionId    String?             @unique @db.Uuid
+  sourceType         SourceType          @default(PERSONAL)
+  status             MediaAssetStatus    @default(UPLOADED)
+  title              String              @db.VarChar(300)
+  originalName       String              @db.VarChar(512)
+  durationMs         Int?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  deletedAt          DateTime?
+  owner              User                @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  uploadSession      UploadSession?      @relation(fields: [uploadSessionId], references: [id], onDelete: SetNull)
+  objects            MediaObject[]
+  processingRuns     ProcessingRun[]
+  transcriptVersions TranscriptVersion[]
+  privateLesson      PrivateLesson?
+
+  @@index([ownerId, status, createdAt])
+}
+
+model MediaObject {
+  id             String          @id @default(uuid()) @db.Uuid
+  mediaAssetId   String          @db.Uuid
+  kind           MediaObjectKind
+  bucket         String          @db.VarChar(255)
+  objectKey      String          @db.VarChar(1024)
+  versionId      String?         @db.VarChar(512)
+  contentType    String          @db.VarChar(128)
+  sizeBytes      BigInt
+  checksumSha256 String?         @db.Char(64)
+  createdAt      DateTime        @default(now())
+  deletedAt      DateTime?
+  mediaAsset     MediaAsset      @relation(fields: [mediaAssetId], references: [id], onDelete: Cascade)
+
+  @@unique([bucket, objectKey, versionId])
+  @@index([mediaAssetId, kind])
+}
+
+model ProcessingRun {
+  id              String            @id @default(uuid()) @db.Uuid
+  ownerId         String            @db.Uuid
+  mediaAssetId    String            @db.Uuid
+  pipelineVersion String            @db.VarChar(128)
+  status          ProcessingStatus  @default(QUEUED)
+  stage           ProcessingStage   @default(VERIFY_MEDIA)
+  attempt         Int               @default(0)
+  requestId       String?           @db.VarChar(128)
+  errorCode       String?           @db.VarChar(128)
+  errorDetail     Json?
+  leaseOwner      String?           @db.VarChar(255)
+  leaseExpiresAt  DateTime?
+  startedAt       DateTime?
+  completedAt     DateTime?
+  failedAt        DateTime?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  owner           User              @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  mediaAsset      MediaAsset        @relation(fields: [mediaAssetId], references: [id], onDelete: Cascade)
+  chunks          ProcessingChunk[]
+
+  @@index([ownerId, status])
+  @@index([status, leaseExpiresAt])
+  @@index([mediaAssetId, createdAt])
+}
+
+model ProcessingChunk {
+  id              String           @id @default(uuid()) @db.Uuid
+  processingRunId String           @db.Uuid
+  chunkIndex      Int
+  startMs         Int
+  endMs           Int
+  status          ProcessingStatus @default(QUEUED)
+  attempt         Int              @default(0)
+  externalJobId   String?          @db.VarChar(512)
+  inputObjectKey  String           @db.VarChar(1024)
+  resultObjectKey String?          @db.VarChar(1024)
+  errorCode       String?          @db.VarChar(128)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  processingRun   ProcessingRun    @relation(fields: [processingRunId], references: [id], onDelete: Cascade)
+
+  @@unique([processingRunId, chunkIndex])
+  @@index([status, updatedAt])
+}
+
+model OutboxEvent {
+  id             String       @id @default(uuid()) @db.Uuid
+  aggregateType  String       @db.VarChar(128)
+  aggregateId    String       @db.VarChar(128)
+  eventType      String       @db.VarChar(128)
+  idempotencyKey String       @unique @db.VarChar(255)
+  payload        Json
+  status         OutboxStatus @default(PENDING)
+  attempts       Int          @default(0)
+  availableAt    DateTime     @default(now())
+  publishedAt    DateTime?
+  lastError      String?      @db.VarChar(1000)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([status, availableAt])
+  @@index([aggregateType, aggregateId])
+}
+
+model TranscriptVersion {
+  id            String           @id @default(uuid()) @db.Uuid
+  mediaAssetId  String           @db.Uuid
+  version       Int
+  language      String           @default("en") @db.VarChar(16)
+  status        TranscriptStatus @default(DRAFT)
+  durationMs    Int
+  cueCount      Int              @default(0)
+  publishedAt   DateTime?
+  createdAt     DateTime         @default(now())
+  mediaAsset    MediaAsset       @relation(fields: [mediaAssetId], references: [id], onDelete: Cascade)
+  cues          SubtitleCue[]
+  privateLesson PrivateLesson?
+
+  @@unique([mediaAssetId, version])
+  @@index([mediaAssetId, status])
 }
 
 model SubtitleCue {
-  id         String           @id @default(cuid())
-  lessonId   String
-  order      Int
-  startMs    Int
-  endMs      Int
-  english    String
-  chinese    String           @default("")
-  keywords   Json
-  reviewed   Boolean          @default(false)
-  lesson     Lesson           @relation(fields: [lessonId], references: [id], onDelete: Cascade)
-  vocabulary VocabularyItem[]
-  recordings Recording[]
+  id                  String            @id @default(uuid()) @db.Uuid
+  transcriptVersionId String            @db.Uuid
+  order               Int
+  startMs             Int
+  endMs               Int
+  text                String
+  words               Json
+  transcriptVersion   TranscriptVersion @relation(fields: [transcriptVersionId], references: [id], onDelete: Cascade)
+
+  @@unique([transcriptVersionId, order])
+  @@index([transcriptVersionId, startMs])
+}
+
+model PrivateLesson {
+  id                  String             @id @default(uuid()) @db.Uuid
+  ownerId             String             @db.Uuid
+  mediaAssetId        String             @unique @db.Uuid
+  transcriptVersionId String?            @unique @db.Uuid
+  title               String             @db.VarChar(300)
+  status              LessonStatus       @default(PROCESSING)
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+  owner               User               @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  mediaAsset          MediaAsset         @relation(fields: [mediaAssetId], references: [id], onDelete: Cascade)
+  transcriptVersion   TranscriptVersion? @relation(fields: [transcriptVersionId], references: [id], onDelete: SetNull)
+  learningUnits       LearningUnit[]
+  progresses          LearningProgress[]
+
+  @@index([ownerId, status, updatedAt])
+}
+
+model LearningUnit {
+  id            String        @id @default(uuid()) @db.Uuid
+  lessonId      String        @db.Uuid
+  order         Int
+  startMs       Int
+  endMs         Int
+  firstCueOrder Int
+  lastCueOrder  Int
+  lesson        PrivateLesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
   @@unique([lessonId, order])
 }
 
 model LearningProgress {
-  id               String   @id @default(cuid())
-  userId           String
-  lessonId         String
-  currentCueId     String?
-  completedCueIds  Json
-  positionMs       Int      @default(0)
-  updatedAt        DateTime @updatedAt
-  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  lesson           Lesson   @relation(fields: [lessonId], references: [id], onDelete: Cascade)
-  @@unique([userId, lessonId])
+  id              String        @id @default(uuid()) @db.Uuid
+  ownerId         String        @db.Uuid
+  lessonId        String        @db.Uuid
+  currentUnitId   String?       @db.Uuid
+  currentCueId    String?       @db.Uuid
+  positionMs      Int           @default(0)
+  completedCueIds Json
+  updatedAt       DateTime      @updatedAt
+  owner           User          @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  lesson          PrivateLesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
+  @@unique([ownerId, lessonId])
+  @@index([lessonId])
 }
 
-model Favorite {
-  id        String   @id @default(cuid())
-  userId    String
-  lessonId  String
-  createdAt DateTime @default(now())
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  lesson    Lesson   @relation(fields: [lessonId], references: [id], onDelete: Cascade)
-  @@unique([userId, lessonId])
+model AuditEvent {
+  id           String   @id @default(uuid()) @db.Uuid
+  actorId      String?  @db.Uuid
+  action       String   @db.VarChar(128)
+  resourceType String   @db.VarChar(128)
+  resourceId   String?  @db.VarChar(128)
+  requestId    String   @db.VarChar(128)
+  metadata     Json
+  createdAt    DateTime @default(now())
+  actor        User?    @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([actorId, createdAt])
+  @@index([resourceType, resourceId])
+  @@index([requestId])
 }
 
-model VocabularyItem {
-  id        String       @id @default(cuid())
-  userId    String
-  lessonId  String
-  cueId     String?
-  word      String
-  meaning   String
-  mastery   Int          @default(0)
-  createdAt DateTime     @default(now())
-  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  lesson    Lesson       @relation(fields: [lessonId], references: [id], onDelete: Cascade)
-  cue       SubtitleCue? @relation(fields: [cueId], references: [id], onDelete: SetNull)
-}
+model IdempotencyRecord {
+  id             String   @id @default(uuid()) @db.Uuid
+  ownerId        String   @db.Uuid
+  scope          String   @db.VarChar(128)
+  key            String   @db.VarChar(255)
+  requestHash    String   @db.Char(64)
+  responseStatus Int
+  responseBody   Json
+  expiresAt      DateTime
+  createdAt      DateTime @default(now())
+  owner          User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
 
-model Recording {
-  id         String       @id @default(cuid())
-  userId     String
-  lessonId   String
-  cueId      String?
-  storageKey String
-  durationMs Int?
-  createdAt  DateTime     @default(now())
-  user       User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  lesson     Lesson       @relation(fields: [lessonId], references: [id], onDelete: Cascade)
-  cue        SubtitleCue? @relation(fields: [cueId], references: [id], onDelete: SetNull)
-}
-
-model Upload {
-  id              String          @id @default(cuid())
-  userId          String
-  videoAssetId    String?
-  originalName    String
-  storageKey      String
-  rightsConfirmed Boolean
-  private         Boolean         @default(true)
-  createdAt       DateTime        @default(now())
-  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  videoAsset      VideoAsset?      @relation(fields: [videoAssetId], references: [id])
-  jobs            ProcessingJob[]
-}
-
-model ProcessingJob {
-  id        String    @id @default(cuid())
-  uploadId  String
-  type      JobType
-  status    JobStatus @default(QUEUED)
-  progress  Int       @default(0)
-  attempts  Int       @default(0)
-  error     String?
-  payload   Json
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  upload    Upload    @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+  @@unique([ownerId, scope, key])
+  @@index([expiresAt])
 }
