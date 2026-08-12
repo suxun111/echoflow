@@ -44,7 +44,7 @@ describe('V1 Prisma baseline', () => {
   it('recreates only a dedicated test database and protects the legacy migration target', () => {
     const prepare = readFileSync(resolve(__dirname, '../scripts/prepare-test-database.ts'), 'utf8')
     const runner = readFileSync(resolve(__dirname, '../scripts/run-migration.ts'), 'utf8')
-    expect(prepare).toContain("databaseName.endsWith('_test')")
+    expect(prepare).toContain('^echoflow_[A-Za-z0-9_]+_test$')
     expect(prepare).toContain('DROP DATABASE IF EXISTS')
     expect(runner).toContain("databaseName === 'online_learning'")
     expect(runner).toContain('Refusing to migrate protected legacy database')

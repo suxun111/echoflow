@@ -8,7 +8,7 @@ async function main() {
   const parsed = new URL(databaseUrl)
   const databaseName = parsed.pathname.slice(1)
 
-  if (!/^[A-Za-z0-9_]+$/.test(databaseName) || !databaseName.endsWith('_test')) {
+  if (!/^echoflow_[A-Za-z0-9_]+_test$/.test(databaseName)) {
     throw new Error(`Refusing to prepare non-test database: ${databaseName}`)
   }
 

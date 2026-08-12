@@ -150,7 +150,9 @@ describe('G1 real PostgreSQL auth and owner boundary', () => {
   it('limits OTP attempts, rejects expired codes and rate-limits repeated requests', async () => {
     const phone = '+8613800000002'
     const otp = await request(app.getHttpServer()).post('/api/v1/auth/otp/request').send({ phone }).expect(200)
-    await request(app.getHttpServer()).post('/api/v1/auth/otp/request').send({ phone }).expect(429)
+    const rateLimited = await request(app.getHttpServer()).post('/api/v1/auth/otp/request').send({ phone }).expect(429)
+    expect(rateLimited.body).toMatchObject({ code: 'rate_limited' })
+    expect(rateLimited.body.requestId).toBeTruthy()
     const incorrectCode = otp.body.developmentCode === '000000' ? '000001' : '000000'
     for (let attempt = 0; attempt < 5; attempt += 1) {
       await request(app.getHttpServer()).post('/api/v1/auth/otp/verify').send({ phone, code: incorrectCode }).expect(401)
@@ -258,10 +260,12 @@ describe('G1 real PostgreSQL auth and owner boundary', () => {
   it('enforces learner/admin RBAC without granting private media access', async () => {
     const learner = await login('+8613800000008')
     const privateOwner = await login('+8613800000010')
-    await request(app.getHttpServer())
+    const forbidden = await request(app.getHttpServer())
       .get('/api/v1/admin/audit-events')
       .set('authorization', `Bearer ${learner.accessToken}`)
       .expect(403)
+    expect(forbidden.body).toMatchObject({ code: 'forbidden' })
+    expect(forbidden.body.requestId).toBeTruthy()
 
     const asset = await database.mediaAsset.create({
       data: { ownerId: privateOwner.user.id, title: 'Owner only', originalName: 'owner-only.mp4' },
