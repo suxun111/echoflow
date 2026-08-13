@@ -14,7 +14,7 @@ import type { MossAdapter } from '../moss/adapter'
 import { FakeMossAdapter } from '../moss/fake-adapter'
 import { enqueuePendingTranscriptCancellations, enqueueRecoverableTranscriptRuns } from '../outbox'
 import { G3_PIPELINE_VERSION } from '../transcript/constants'
-import { cancelExternalTranscriptJobs, createTranscriptProcessor } from './transcript'
+import { cancelExternalTranscriptJobs, createTranscriptProcessor, renewTranscriptRunLease } from './transcript'
 import { cleanupTranscriptObjects } from './transcript-cleanup'
 
 const execFileAsync = promisify(execFile)
@@ -235,6 +235,73 @@ describe('G3 real media pipeline with deterministic Fake MOSS', () => {
       where: { mediaAssetId: asset.id, kind: { in: ['NORMALIZED_AUDIO', 'AUDIO_CHUNK'] }, purgedAt: { not: null } },
     })).toBe(2)
   }, 120_000)
+
+  it('serializes terminal cleanup with retry adoption and keeps the retried object alive', async () => {
+    const { asset, run } = await createRun(shortPath, 30_000, '23')
+    const moss = new FakeMossAdapter()
+    const seed = createTranscriptProcessor({ database, storage, moss, env, workerId: 'g3-cleanup-seed' })
+    await seed({ mediaAssetId: asset.id, processingRunId: run.id })
+    const normalized = await database.mediaObject.findFirstOrThrow({
+      where: { mediaAssetId: asset.id, kind: 'NORMALIZED_AUDIO' },
+    })
+    await database.$transaction([
+      database.processingRun.update({
+        where: { id: run.id }, data: {
+          status: 'FAILED', stage: 'PLAYBACK_READY', errorCode: 'audio_extract_failed',
+          leaseOwner: null, leaseExpiresAt: null,
+        },
+      }),
+      database.processingChunk.deleteMany({ where: { processingRunId: run.id } }),
+      database.mediaObject.update({
+        where: { id: normalized.id }, data: { createdAt: new Date(Date.now() - 25 * 60 * 60_000) },
+      }),
+    ])
+    let releaseCleanup!: () => void
+    let signalCleanup!: () => void
+    const cleanupGate = new Promise<void>((resolve) => { releaseCleanup = resolve })
+    const cleanupStarted = new Promise<void>((resolve) => { signalCleanup = resolve })
+    const cleanupStorage = wrapStorage({
+      remove: async (objectKey, versionId) => {
+        if (objectKey === normalized.objectKey) {
+          signalCleanup()
+          await cleanupGate
+        }
+        return storage.remove(objectKey, versionId)
+      },
+    })
+    const cleanup = cleanupTranscriptObjects(database, cleanupStorage)
+    await cleanupStarted
+    await database.processingRun.update({
+      where: { id: run.id }, data: { status: 'QUEUED', stage: 'PLAYBACK_READY', errorCode: null, leaseOwner: null, leaseExpiresAt: null },
+    })
+    const replacement = createTranscriptProcessor({ database, storage, moss, env, workerId: 'g3-cleanup-retry' })
+    const retrying = replacement({ mediaAssetId: asset.id, processingRunId: run.id })
+    releaseCleanup()
+    await expect(cleanup).resolves.toMatchObject({ cleaned: 1, failed: 0 })
+    await expect(retrying).resolves.toMatchObject({ waiting: true })
+    const retired = await database.mediaObject.findUniqueOrThrow({ where: { id: normalized.id } })
+    expect(retired.deletedAt).not.toBeNull()
+    expect(retired.purgedAt).not.toBeNull()
+    const adopted = await database.mediaObject.findFirstOrThrow({
+      where: { mediaAssetId: asset.id, kind: 'NORMALIZED_AUDIO', deletedAt: null },
+    })
+    expect(adopted).toMatchObject({ deletedAt: null, purgedAt: null })
+    expect((adopted.metadata as { uploadState?: string }).uploadState).toBe('READY')
+    expect(adopted.createdAt.getTime()).toBeGreaterThan(Date.now() - 60_000)
+    await expect(storage.statObject(adopted.objectKey, adopted.versionId)).resolves.toMatchObject({ objectKey: adopted.objectKey })
+  }, 120_000)
+
+  it('does not resurrect an expired run lease during a delayed heartbeat', async () => {
+    const { asset, run } = await createRun(shortPath, 30_000, '24')
+    const expired = new Date(Date.now() - 1_000)
+    await database.processingRun.update({
+      where: { id: run.id }, data: { status: 'PROCESSING', leaseOwner: 'g3-expired-owner', leaseExpiresAt: expired },
+    })
+    await expect(renewTranscriptRunLease(database, {
+      mediaAssetId: asset.id, processingRunId: run.id,
+    }, 'g3-expired-owner')).resolves.toEqual({ count: 0 })
+    expect((await database.processingRun.findUniqueOrThrow({ where: { id: run.id } })).leaseExpiresAt).toEqual(expired)
+  })
 
   it('persists and cancels a MOSS job when cancellation commits while submit is in flight', async () => {
     const { asset, run } = await createRun(shortPath, 30_000, '5')
@@ -568,6 +635,82 @@ describe('G3 real media pipeline with deterministic Fake MOSS', () => {
     expect(normalizedUploads).toBe(1)
   }, 120_000)
 
+  it('purges an untracked response-loss version by its exact identity without leaving an anonymous object', async () => {
+    const { asset, run } = await createRun(shortPath, 30_000, '27')
+    const moss = new FakeMossAdapter()
+    let loseFirstResponse = true
+    const responseLosingStorage = wrapStorage({
+      uploadFile: async (objectKey, filePath, contentType) => {
+        const uploaded = await storage.uploadFile(objectKey, filePath, contentType)
+        if (objectKey.endsWith('/normalized.wav') && loseFirstResponse) {
+          loseFirstResponse = false
+          throw new Error('simulated_cleanup_response_loss')
+        }
+        return uploaded
+      },
+    })
+    const worker = createTranscriptProcessor({
+      database, storage: responseLosingStorage, moss, env, workerId: 'g3-worker-object-cleanup-gap',
+    })
+    await expect(worker({ mediaAssetId: asset.id, processingRunId: run.id })).rejects.toThrow('simulated_cleanup_response_loss')
+    const pending = await database.mediaObject.findFirstOrThrow({
+      where: { mediaAssetId: asset.id, kind: 'NORMALIZED_AUDIO' },
+    })
+    expect(pending.versionId).toBeNull()
+    const orphan = await storage.statObject(pending.objectKey, null)
+    await database.$transaction([
+      database.processingRun.update({
+        where: { id: run.id },
+        data: { status: 'CANCELLED', errorCode: 'processing_cancelled', leaseOwner: null, leaseExpiresAt: null },
+      }),
+      database.mediaObject.update({
+        where: { id: pending.id }, data: { createdAt: new Date(Date.now() - 25 * 60 * 60_000) },
+      }),
+    ])
+
+    await expect(cleanupTranscriptObjects(database, storage)).resolves.toMatchObject({ cleaned: 1, failed: 0 })
+    const purged = await database.mediaObject.findUniqueOrThrow({ where: { id: pending.id } })
+    expect(purged.versionId).toBe(orphan.versionId)
+    expect(purged.purgedAt).not.toBeNull()
+    await expect(storage.statObject(pending.objectKey, orphan.versionId)).rejects.toBeTruthy()
+  }, 120_000)
+
+  it('preserves database identities for every surviving object version when replacing corrupted latest data', async () => {
+    const { asset, run } = await createRun(shortPath, 30_000, '25')
+    const moss = new FakeMossAdapter()
+    const seed = createTranscriptProcessor({ database, storage, moss, env, workerId: 'g3-version-seed' })
+    await seed({ mediaAssetId: asset.id, processingRunId: run.id })
+    const original = await database.mediaObject.findFirstOrThrow({
+      where: { mediaAssetId: asset.id, kind: 'NORMALIZED_AUDIO' },
+    })
+    const corruptPath = join(directory, 'corrupt-latest.wav')
+    await writeFile(corruptPath, 'not-a-valid-normalized-wave')
+    const corrupt = await storage.uploadFile(original.objectKey, corruptPath, 'audio/wav')
+    await database.$transaction([
+      database.processingChunk.deleteMany({ where: { processingRunId: run.id } }),
+      database.processingRun.update({
+        where: { id: run.id }, data: {
+          status: 'QUEUED', stage: 'PLAYBACK_READY', errorCode: null,
+          leaseOwner: null, leaseExpiresAt: null,
+        },
+      }),
+    ])
+    const replacement = createTranscriptProcessor({ database, storage, moss, env, workerId: 'g3-version-replacement' })
+    await expect(replacement({ mediaAssetId: asset.id, processingRunId: run.id })).resolves.toMatchObject({ waiting: true })
+
+    const versions = await database.mediaObject.findMany({
+      where: { mediaAssetId: asset.id, kind: 'NORMALIZED_AUDIO' }, orderBy: { createdAt: 'asc' },
+    })
+    expect(versions).toHaveLength(2)
+    expect(versions.map((item) => item.versionId)).toContain(original.versionId)
+    expect(versions.every((item) => item.versionId !== null)).toBe(true)
+    const current = versions.find((item) => item.deletedAt === null)!
+    expect(current.versionId).not.toBe(original.versionId)
+    await expect(storage.statObject(original.objectKey, original.versionId)).resolves.toMatchObject({ versionId: original.versionId })
+    await expect(storage.statObject(current.objectKey, current.versionId)).resolves.toMatchObject({ versionId: current.versionId })
+    await expect(storage.statObject(corrupt.objectKey, corrupt.versionId)).rejects.toBeTruthy()
+  }, 120_000)
+
   it('serializes overlapping uploads and prevents a stale worker from orphaning the replacement object', async () => {
     const { asset, run } = await createRun(shortPath, 30_000, '17')
     const moss = new FakeMossAdapter()
@@ -682,6 +825,102 @@ describe('G3 real media pipeline with deterministic Fake MOSS', () => {
     },
     120_000,
   )
+
+  it('keeps an existing READY version addressable after a replacement worker is killed before upload', async () => {
+    const { asset, run } = await createRun(shortPath, 30_000, '26')
+    const moss = new FakeMossAdapter()
+    const seed = createTranscriptProcessor({ database, storage, moss, env, workerId: 'g3-existing-version-seed' })
+    await seed({ mediaAssetId: asset.id, processingRunId: run.id })
+    const original = await database.mediaObject.findFirstOrThrow({
+      where: { mediaAssetId: asset.id, kind: 'NORMALIZED_AUDIO' },
+    })
+    const corruptPath = join(directory, 'existing-version-corrupt.wav')
+    await writeFile(corruptPath, 'force-the-replacement-upload-path')
+    const corrupt = await storage.uploadFile(original.objectKey, corruptPath, 'audio/wav')
+    await database.$transaction([
+      database.processingChunk.deleteMany({ where: { processingRunId: run.id } }),
+      database.processingRun.update({
+        where: { id: run.id }, data: {
+          status: 'QUEUED', stage: 'PLAYBACK_READY', errorCode: null,
+          leaseOwner: null, leaseExpiresAt: null,
+        },
+      }),
+    ])
+    const workerRoot = join(__dirname, '..', '..')
+    const fixture = join('src', 'test-fixtures', 'transcript-crash-worker-child.ts')
+    const tsxCli = require.resolve('tsx/cli')
+    const child = spawn(process.execPath, [tsxCli, fixture], {
+      cwd: workerRoot, windowsHide: true,
+      env: {
+        ...process.env,
+        DATABASE_URL: 'postgresql://online_learning:online_learning@localhost:5432/echoflow_g2_worker_test',
+        MINIO_ENDPOINT: 'localhost', MINIO_PORT: '9000',
+        MINIO_ACCESS_KEY: 'online_learning', MINIO_SECRET_KEY: 'online_learning_secret',
+        MINIO_BUCKET: 'echoflow-g3-worker-test', FFMPEG_PATH: 'ffmpeg',
+        G3_TEST_MEDIA_ASSET_ID: asset.id, G3_TEST_PROCESSING_RUN_ID: run.id,
+        G3_TEST_CRASH_POINT: 'before-upload',
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    const stopChild = async () => {
+      if (child.exitCode !== null || child.signalCode !== null) return
+      const exited = new Promise<void>((resolve) => child.once('exit', () => resolve()))
+      if (process.platform === 'win32' && child.pid) {
+        await execFileAsync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true }).catch(() => undefined)
+      } else child.kill('SIGKILL')
+      await Promise.race([exited, new Promise((_, reject) => setTimeout(() => reject(new Error('g3_existing_child_kill_timeout')), 5_000))])
+    }
+    try {
+      await new Promise<void>((resolve, reject) => {
+        let output = ''
+        const timeout = setTimeout(() => reject(new Error('g3_existing_crash_point_timeout')), 30_000)
+        child.stdout?.on('data', (chunk: Buffer) => {
+          output += chunk.toString('utf8')
+          if (output.includes('g3_crash_point_reached')) {
+            clearTimeout(timeout)
+            resolve()
+          }
+        })
+        child.once('exit', (code) => {
+          if (!output.includes('g3_crash_point_reached')) {
+            clearTimeout(timeout)
+            reject(new Error(`g3_existing_crash_child_exited_${String(code)}`))
+          }
+        })
+      })
+      await stopChild()
+      const reserved = await database.mediaObject.findMany({
+        where: { mediaAssetId: asset.id, kind: 'NORMALIZED_AUDIO' },
+      })
+      expect(reserved).toHaveLength(2)
+      expect(reserved.map((item) => item.versionId)).toEqual(expect.arrayContaining([original.versionId, null]))
+      await expect(storage.statObject(original.objectKey, original.versionId)).resolves.toMatchObject({ versionId: original.versionId })
+      await expect(storage.statObject(corrupt.objectKey, corrupt.versionId)).rejects.toBeTruthy()
+
+      await database.$transaction([
+        database.processingRun.update({
+          where: { id: run.id }, data: { status: 'CANCELLED', errorCode: 'processing_cancelled', leaseOwner: null, leaseExpiresAt: null },
+        }),
+        database.mediaObject.updateMany({
+          where: { mediaAssetId: asset.id, kind: 'NORMALIZED_AUDIO', versionId: null },
+          data: { createdAt: new Date(Date.now() - 25 * 60 * 60_000) },
+        }),
+      ])
+      await expect(cleanupTranscriptObjects(database, storage)).resolves.toMatchObject({ cleaned: 1, failed: 0 })
+      expect(await database.mediaObject.count({
+        where: { mediaAssetId: asset.id, kind: 'NORMALIZED_AUDIO', purgedAt: { not: null } },
+      })).toBe(1)
+      await expect(storage.statObject(original.objectKey, original.versionId)).resolves.toMatchObject({ versionId: original.versionId })
+
+      await database.mediaObject.update({
+        where: { id: original.id }, data: { createdAt: new Date(Date.now() - 25 * 60 * 60_000) },
+      })
+      await expect(cleanupTranscriptObjects(database, storage)).resolves.toMatchObject({ cleaned: 1, failed: 0 })
+      await expect(storage.statObject(original.objectKey, original.versionId)).rejects.toBeTruthy()
+    } finally {
+      await stopChild()
+    }
+  }, 120_000)
 
   it('rejects a corrupted immutable ASR object without publishing any transcript', async () => {
     const { asset, run } = await createRun(shortPath, 30_000, '10')

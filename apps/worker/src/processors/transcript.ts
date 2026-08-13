@@ -22,6 +22,21 @@ export type TranscriptJob = { mediaAssetId: string; processingRunId: string }
 
 class TranscriptLeaseLostError extends Error {}
 
+export function renewTranscriptRunLease(
+  database: PrismaClient,
+  job: TranscriptJob,
+  workerId: string,
+  now = new Date(),
+) {
+  return database.processingRun.updateMany({
+    where: {
+      id: job.processingRunId, mediaAssetId: job.mediaAssetId,
+      status: 'PROCESSING', leaseOwner: workerId, leaseExpiresAt: { gt: now },
+    },
+    data: { leaseExpiresAt: new Date(now.getTime() + 5 * 60_000) },
+  })
+}
+
 export async function cancelExternalTranscriptJobs(
   database: PrismaClient,
   moss: MossAdapter,
@@ -158,9 +173,9 @@ export function createTranscriptProcessor(options: TranscriptProcessorOptions) {
         where: { mediaAssetId, bucket: options.storage.bucket, objectKey },
         orderBy: { createdAt: 'desc' },
       })
-      const current = records.find((candidate) => candidate.versionId === null) ?? records[0]
-      if (current && current.kind !== kind) throw new Error('tracked_object_identity_conflict')
-      if (!current) {
+      if (records.some((candidate) => candidate.kind !== kind)) throw new Error('tracked_object_identity_conflict')
+      const pending = records.find((candidate) => candidate.versionId === null)
+      if (!pending) {
         return reservation.mediaObject.create({
           data: {
             mediaAssetId, kind, bucket: options.storage.bucket, objectKey, versionId: null,
@@ -170,10 +185,10 @@ export function createTranscriptProcessor(options: TranscriptProcessorOptions) {
         })
       }
       return reservation.mediaObject.update({
-        where: { id: current.id },
+        where: { id: pending.id },
         data: {
-          kind, versionId: null, contentType, sizeBytes: BigInt(expectedSize), checksumSha256, etag: null,
-          deletedAt: null, purgedAt: null, metadata: { ...metadata, uploadState: 'PENDING' },
+          kind, contentType, sizeBytes: BigInt(expectedSize), checksumSha256, etag: null,
+          createdAt: now(), deletedAt: null, purgedAt: null, metadata: { ...metadata, uploadState: 'PENDING' },
         },
       })
     }, { maxWait: 10_000, timeout: 30_000 })
@@ -203,7 +218,16 @@ export function createTranscriptProcessor(options: TranscriptProcessorOptions) {
               await rm(verificationPath, { force: true })
             }
           }
-          if (!object) await options.storage.remove(objectKey, existing.versionId)
+          if (!object) {
+            await options.storage.remove(objectKey, existing.versionId)
+            await transaction.mediaObject.updateMany({
+              where: {
+                bucket: options.storage.bucket, objectKey, versionId: existing.versionId,
+                purgedAt: null,
+              },
+              data: { deletedAt: now(), purgedAt: now() },
+            })
+          }
         } catch (error) {
           if (!isMissingObject(error)) throw error
         }
@@ -226,6 +250,33 @@ export function createTranscriptProcessor(options: TranscriptProcessorOptions) {
           }
           throw new TranscriptLeaseLostError('tracked_object_fence_lost')
         }
+        const adopted = object.versionId
+          ? await transaction.mediaObject.findFirst({
+              where: {
+                bucket: options.storage.bucket, objectKey, versionId: object.versionId,
+                id: { not: record.id },
+              },
+            })
+          : null
+        if (adopted) {
+          await transaction.mediaObject.delete({ where: { id: record.id } })
+          await transaction.mediaObject.update({
+            where: { id: adopted.id },
+            data: {
+              contentType: object.contentType ?? contentType, sizeBytes: BigInt(object.sizeBytes),
+              etag: object.etag, checksumSha256, createdAt: now(), deletedAt: null, purgedAt: null,
+              metadata: { ...metadata, uploadState: 'READY' },
+            },
+          })
+          return object
+        }
+        await transaction.mediaObject.updateMany({
+          where: {
+            mediaAssetId, bucket: options.storage.bucket, objectKey,
+            id: { not: record.id }, deletedAt: null,
+          },
+          data: { deletedAt: now() },
+        })
         await transaction.mediaObject.update({
           where: { id: record.id },
           data: {
@@ -766,10 +817,9 @@ export function createTranscriptProcessor(options: TranscriptProcessorOptions) {
       data: { status: 'PROCESSING', leaseOwner: options.workerId, leaseExpiresAt: new Date(now().getTime() + 5 * 60_000), startedAt: now() },
     })
     if (claimed.count !== 1) return { skipped: true }
-    const heartbeat = setInterval(() => void options.database.processingRun.updateMany({
-      where: { id: job.processingRunId, status: 'PROCESSING', leaseOwner: options.workerId },
-      data: { leaseExpiresAt: new Date(now().getTime() + 5 * 60_000) },
-    }).catch(() => undefined), 30_000)
+    const heartbeat = setInterval(() => void renewTranscriptRunLease(
+      options.database, job, options.workerId, now(),
+    ).catch(() => undefined), 30_000)
     heartbeat.unref()
     const directory = await mkdtemp(join(tmpdir(), 'echoflow-transcript-'))
     try {
@@ -784,7 +834,7 @@ export function createTranscriptProcessor(options: TranscriptProcessorOptions) {
     } catch (error) {
       if (error instanceof TranscriptLeaseLostError) return { skipped: true, leaseLost: true }
       const current = await options.database.processingRun.findUnique({
-        where: { id: job.processingRunId }, select: { attempt: true, stage: true },
+        where: { id: job.processingRunId }, select: { attempt: true, stage: true, leaseExpiresAt: true },
       })
       const code = error instanceof TranscriptValidationError
         ? error.code
@@ -795,8 +845,14 @@ export function createTranscriptProcessor(options: TranscriptProcessorOptions) {
             : 'audio_extract_failed'
       const attempt = (current?.attempt ?? 0) + 1
       const terminal = error instanceof TranscriptValidationError || attempt >= options.env.MOSS_MAX_ATTEMPTS
+      if (!current?.leaseExpiresAt || current.leaseExpiresAt.getTime() <= now().getTime()) {
+        return { skipped: true, leaseLost: true }
+      }
       await options.database.processingRun.updateMany({
-        where: { id: job.processingRunId, status: 'PROCESSING', leaseOwner: options.workerId },
+        where: {
+          id: job.processingRunId, mediaAssetId: job.mediaAssetId,
+          status: 'PROCESSING', leaseOwner: options.workerId, leaseExpiresAt: { gt: now() },
+        },
         data: terminal ? {
           status: 'FAILED', failedAt: now(), errorCode: code, errorDetail: { message: error instanceof Error ? error.message.slice(0, 500) : 'unknown' },
           leaseOwner: null, leaseExpiresAt: null, attempt,

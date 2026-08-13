@@ -34,31 +34,66 @@ export async function cleanupTranscriptObjects(
   for (const object of candidates) {
     const processingRunId = metadataRunId(object.metadata)
     if (!processingRunId) continue
-    const tombstone = await database.$transaction(async (transaction) => {
-      await transaction.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${object.mediaAssetId}, 0))`
-      const run = await transaction.processingRun.findFirst({
-        where: { id: processingRunId, mediaAssetId: object.mediaAssetId }, select: { status: true },
-      })
-      if (!run || !['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(run.status)) return false
-      const retentionMs = object.kind === 'ASR_RAW'
-        ? 7 * 24 * 60 * 60_000
-        : 24 * 60 * 60_000
-      if (object.createdAt.getTime() > now.getTime() - retentionMs) return false
-      if (object.deletedAt) return true
-      const changed = await transaction.mediaObject.updateMany({ where: { id: object.id, deletedAt: null, purgedAt: null }, data: { deletedAt: now } })
-      return changed.count === 1
-    })
-    if (!tombstone) continue
     try {
-      await storage.remove(object.objectKey, object.versionId)
-      await database.mediaObject.updateMany({ where: { id: object.id, purgedAt: null }, data: { purgedAt: now } })
-      cleaned += 1
+      const purged = await database.$transaction(async (transaction) => {
+        const objectIdentity = `${object.bucket}:${object.objectKey}`
+        await transaction.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${objectIdentity}, 0))`
+        const current = await transaction.mediaObject.findUnique({ where: { id: object.id } })
+        if (!current || current.purgedAt) return false
+        const currentRunId = metadataRunId(current.metadata)
+        if (currentRunId !== processingRunId) return false
+        const run = await transaction.processingRun.findFirst({
+          where: { id: processingRunId, mediaAssetId: current.mediaAssetId }, select: { status: true },
+        })
+        if (!run || !['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(run.status)) return false
+        const retentionMs = current.kind === 'ASR_RAW'
+          ? 7 * 24 * 60 * 60_000
+          : 24 * 60 * 60_000
+        if (current.createdAt.getTime() > now.getTime() - retentionMs) return false
+        if (!current.deletedAt) {
+          const tombstoned = await transaction.mediaObject.updateMany({
+            where: { id: current.id, versionId: current.versionId, deletedAt: null, purgedAt: null },
+            data: { deletedAt: now },
+          })
+          if (tombstoned.count !== 1) return false
+        }
+        let removedVersionId = current.versionId
+        if (removedVersionId) {
+          try {
+            await storage.remove(current.objectKey, removedVersionId)
+          } catch (error) {
+            if (!isMissingObject(error)) throw error
+          }
+        } else {
+          try {
+            const latest = await storage.statObject(current.objectKey, null)
+            const tracked = await transaction.mediaObject.findFirst({
+              where: {
+                id: { not: current.id },
+                bucket: current.bucket,
+                objectKey: current.objectKey,
+                versionId: latest.versionId,
+              },
+              select: { id: true, purgedAt: true },
+            })
+            if (tracked?.purgedAt) {
+              await storage.remove(current.objectKey, latest.versionId)
+            } else if (!tracked) {
+              await storage.remove(current.objectKey, latest.versionId)
+              removedVersionId = latest.versionId
+            }
+          } catch (error) {
+            if (!isMissingObject(error)) throw error
+          }
+        }
+        const finalized = await transaction.mediaObject.updateMany({
+          where: { id: current.id, versionId: current.versionId, purgedAt: null },
+          data: { versionId: removedVersionId, purgedAt: now },
+        })
+        return finalized.count === 1
+      }, { maxWait: 10 * 60_000, timeout: 30 * 60_000 })
+      if (purged) cleaned += 1
     } catch (error) {
-      if (isMissingObject(error)) {
-        await database.mediaObject.updateMany({ where: { id: object.id, purgedAt: null }, data: { purgedAt: now } })
-        cleaned += 1
-        continue
-      }
       failed += 1
     }
   }
