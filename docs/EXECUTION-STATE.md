@@ -9,17 +9,17 @@
 | 字段 | 当前值 |
 |---|---|
 | Goal | `v0.5.0-alpha.1` |
-| Gate | `G1 契约、数据库、身份和安全` 已关闭；`G2 长视频上传与可播放资产` 已开始 |
+| Gate | `G1` 已关闭；`G2` 退出条件 1–7 已通过，条件 8“证据进入唯一 trunk”待收口；`G3` 尚未开始 |
 | 唯一 trunk | `master` |
 | V1 产品代码审计源点 | `42968ad` |
 | G0 文档基线 | `d01c67e`，已 fast-forward 至 master |
 | fresh-clone 修复 | `0e3c912`，已 fast-forward 至 master；来源分支为 `codex/g0-fresh-clone-topology-20260811` |
 | G1 实施分支 | `codex/g1-contract-database-auth-20260812`；最终代码锚点 `4bfaaba` |
-| G2 实施分支 | `codex/g2-long-video-upload-playback-20260812`；任务合同见 `docs/G2-TASK-CONTRACT.md` |
-| WIP | G2 长视频上传、对象校验与签名播放纵向闭环 |
-| 产品功能开发 | G2 已获用户确认并进入实施；G3–G5 继续冻结 |
+| G2 实施分支 | `codex/g2-long-video-upload-playback-20260812`；最终代码验收锚点 `d08f6c6` |
+| WIP | G2 证据提交与唯一 trunk 收口；无 G3 代码 WIP |
+| 产品功能开发 | G2 代码与证据已通过，待 Git 收口；G3–G5 继续冻结 |
 | Remote | `origin = https://github.com/suxun111/echoflow.git`；Private；外部恢复验证通过 |
-| 下一人工边界 | G2 最终证据与 Reviewer 通过后，复盘是否关闭 G2 |
+| 下一人工边界 | G2 证据进入 master 后，用户确认是否冻结并开始 G3 |
 
 ## 2026-08-11 决策澄清
 
@@ -94,8 +94,20 @@
 ## 当前进行中
 
 - G1 已按 [验证证据](G1-VERIFICATION-EVIDENCE.md) 关闭；
-- G2 已冻结 [任务合同](G2-TASK-CONTRACT.md)，正在实现真实 Multipart、7 天续传、对象校验、媒体探测与 owner-scoped 签名播放；
-- 本 Gate 不接入 MOSS、不生成字幕、不进入 G3。
+- G2 已按 [任务合同](G2-TASK-CONTRACT.md) 实现，退出证据见 [验证证据](G2-VERIFICATION-EVIDENCE.md)；
+- 最终代码验收锚点为 `d08f6c6`，独立 Reviewer 结论为无 P0/P1；
+- 只剩将本证据提交并 fast-forward 至唯一 trunk，完成前不提前关闭 G2；
+- 当前没有 G3 代码 WIP；接入 MOSS 和生成字幕必须先获得下一次任务确认。
+
+## G2 待收口证据
+
+- 私人 MP4 已形成浏览器 Multipart 直传、PostgreSQL/Outbox、Redis/Worker、ffprobe/fast-start 与 owner-scoped 签名 Range 播放的真实闭环；
+- complete、cancel、过期清理与 Worker 发布使用数据库锁、lease 和最终 fencing，迟到请求与旧 Worker 不能复活或破坏已发布资产；
+- 最终锚点全仓 lint、87 个默认测试、四应用 build、Prisma validate 和 Compose config 通过；
+- 30 秒黄金样本与 5/30/60/120 分钟真实长媒体矩阵通过；
+- `d08f6c6` 的 fresh clone 冻结安装、lint、test、build 通过；本机 `NODE_ENV` 与失效代理边界已在证据中记录；
+- `68a1703` 浏览器完成 OTP、真实直传、Worker 检查与签名播放；最终运行时代码 `8d9ac84` 复验登录态、资产读取和签名播放，`d08f6c6` 只增加错误 Part 测试；
+- G2 不包含 MOSS、字幕、学习单元、逐句练习或生产部署。
 
 ## G1 关闭证据
 

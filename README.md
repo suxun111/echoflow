@@ -10,7 +10,7 @@ EchoFlow V1 是一个私人英语长视频影子学习工具。目标链路是�
 → 逐句循环、录音回听和进度恢复
 ```
 
-当前仓库仍处于高保真原型和工程骨架阶段，目标架构尚未全部接通。不要根据页面、接口或 Worker 文件存在就判断功能已经完成。
+当前实施分支已完成 G1 安全数据基线和 G2 私人长视频上传/原片播放实现，但 G2 证据尚待进入唯一 trunk，MOSS 字幕、影子练习与生产发布也尚未接通。不要根据页面、接口或 Worker 文件存在就判断 V1 已整体完成。
 
 ## 当前执行基线
 
@@ -20,7 +20,8 @@ EchoFlow V1 是一个私人英语长视频影子学习工具。目标链路是�
 - G0 成果保护、唯一主线与外部恢复闭环已经完成；
 - G1 契约、数据库、身份和安全已通过；最终代码验证锚点为 `4bfaaba`；
 - 外部私有仓库：`https://github.com/suxun111/echoflow.git`；
-- 下一 Gate 是 G2 长视频上传与可播放资产，任务合同确认前 G2–G5 继续冻结；
+- G2 长视频上传与可播放资产的代码/证据已通过；最终代码验收锚点为 `d08f6c6`，待证据进入唯一 trunk 后关闭；
+- 下一 Gate 是 G3 MOSS 与完整字幕原子发布，任务合同确认前 G3–G5 继续冻结；
 - recovery、hardening、daily-goal 分支不得整体盲合。
 
 开始开发或审查前依次阅读：
@@ -29,18 +30,19 @@ EchoFlow V1 是一个私人英语长视频影子学习工具。目标链路是�
 2. [v0.5.0-alpha.1 Goal](docs/GOAL-v0.5.0-alpha.1.md)
 3. [EchoFlow V1 PRD](docs/EchoFlow-V1-PRD.md)
 4. [G1 验证证据](docs/G1-VERIFICATION-EVIDENCE.md)
-5. [G0 分支资产台账](docs/G0-BRANCH-ASSET-INVENTORY.md)
+5. [G2 验证证据](docs/G2-VERIFICATION-EVIDENCE.md)
+6. [G0 分支资产台账](docs/G0-BRANCH-ASSET-INVENTORY.md)
 
 ## 工作区
 
-- `apps/web`：React + Vite 学习端；当前含课程库、练习、录音和上传原型，V1 将收敛到“我的视频”。
+- `apps/web`：React + Vite 学习端；当前已接通 OTP、“我的视频”、私人上传任务和原片播放，字幕学习仍待 G3/G4。
 - `apps/admin`：React + Vite 管理端骨架；V1 只保留内部任务支持能力。
-- `apps/api`：NestJS API；当前生产入口只挂载 `/api/v1` 健康检查、OTP/Access/Refresh、`users/me`、owner Lesson 和最小审计接口，旧原型模块不挂载。
-- `apps/worker`：BullMQ 媒体处理 Worker 骨架，模拟转码、转写、翻译、分句、发布流程。
+- `apps/api`：NestJS API；当前生产入口包含 G1 身份/owner 基线与 G2 上传、媒体资产和签名播放接口，旧公共内容原型不进入 V1 主路径。
+- `apps/worker`：BullMQ + PostgreSQL Outbox 媒体 Worker；G2 已接通真实探测、fast-start、任务恢复和 lease fencing，MOSS 转写留到 G3。
 - `packages/contracts`：Zod 契约和跨端共享类型。
 - `packages/config`：服务端环境变量解析。
 - `packages/ui`：共享 UI token 与基础组件。
-- `packages/storage`：存储适配骨架；G2 才接通真实 Multipart 与签名播放。
+- `packages/storage`：私有 MinIO/S3 Multipart、对象事实核验、Version 与短期签名读写适配层。
 - `packages/database`：V1 Prisma baseline、migration 与独立 `_test` 数据库门禁。
 
 ## 常用命令
@@ -71,6 +73,7 @@ pnpm --filter @online-learning/worker dev
 - [Goal](docs/GOAL-v0.5.0-alpha.1.md)
 - [Execution State](docs/EXECUTION-STATE.md)
 - [G1 验证证据](docs/G1-VERIFICATION-EVIDENCE.md)
+- [G2 验证证据](docs/G2-VERIFICATION-EVIDENCE.md)
 - [G0 分支资产台账](docs/G0-BRANCH-ASSET-INVENTORY.md)
 - [架构说明](docs/ARCHITECTURE.md)
 - [API 契约](docs/API.md)

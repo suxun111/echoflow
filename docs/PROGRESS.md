@@ -15,18 +15,17 @@ EchoFlow 已具备：
 
 EchoFlow 尚不具备：
 
-- master 上真实的个人长视频上传闭环；
-- G2 的长视频上传、对象存储和可播放 MediaAsset；
-- 可恢复的 Outbox/Worker/MOSS 完整流水线；
+- MOSS 完整字幕与字幕原子发布；
+- 可恢复的 Outbox/Worker/MOSS 完整转写流水线；
 - 真实媒体、完整字幕、逐句练习和进度恢复纵向链路；
 - CI、生产发布和真实基础设施恢复闭环。
 
-G1 已建立真实 PostgreSQL/Auth/owner 基线，但上传、MOSS、学习端接线和生产运维尚未闭环，因此仍不能承载真实用户私人视频或公开部署。
+G1 已建立真实 PostgreSQL/Auth/owner 基线，G2 已建立私人 MP4 上传与原片播放闭环；但 MOSS、字幕、影子练习和生产运维尚未闭环，因此仍不能作为完整 V1 或公开生产服务交付。
 
 ## 当前 Git 基线
 
 ```text
-master                          唯一移动 trunk；GitHub 外部验证锚点 3c07e4e
+master                          唯一移动 trunk；G0 GitHub 外部恢复历史锚点 3c07e4e
 V1 产品代码审计源点            42968ad
 G0 文档基线                    d01c67e
 fresh-clone 修复来源分支        codex/g0-fresh-clone-topology-20260811@0e3c912
@@ -91,4 +90,16 @@ G1 契约、数据库、身份和安全
 - fresh clone 冻结安装、lint、58 个测试、Web/Admin/API/Worker build 全部通过；
 - 完整证据见 [G1 验证证据](G1-VERIFICATION-EVIDENCE.md)。
 
-下一步是先冻结 G2 任务合同，不直接沿用旧上传原型。
+## G2 代码与证据已通过，待 trunk 收口
+
+- 浏览器真实 Multipart 私人直传、32 MiB 默认分片、并发 3 与 7 天续传已接通；
+- API 以 provider manifest、HEAD、ETag/Version 和大小完成校验，重复/并发 complete 只产生一份资产；
+- PostgreSQL Outbox、Redis 与 Worker 支持重投、恢复、lease heartbeat 和最终 fencing；
+- 真实 ffprobe 验证 MP4/H.264/AAC，slow-start 只做无损 fast-start remux；
+- owner-scoped 短期签名播放支持 HTTP Range，双用户和管理员负向权限通过；
+- Web 已提供 OTP、我的视频、上传/恢复任务与真实原片播放；
+- 最终代码锚点 `d08f6c6` 通过独立 Reviewer，无 P0/P1；
+- 全仓 lint、87 个默认测试、四应用 build、30 秒黄金样本及 5/30/60/120 分钟真实长媒体矩阵通过；
+- fresh clone 通过；`68a1703` 浏览器完整上传链和最终运行时代码 `8d9ac84` 的签名播放复验通过，`d08f6c6` 只增加错误 Part 测试，边界见 [G2 验证证据](G2-VERIFICATION-EVIDENCE.md)。
+
+当前只剩把证据提交并 fast-forward 至唯一 trunk；完成前不提前关闭 G2。关闭后下一步是先冻结 G3“MOSS 与完整字幕原子发布”的任务合同；G2 的绿色不代表字幕或学习闭环已完成。
