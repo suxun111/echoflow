@@ -668,6 +668,20 @@ describe('G3 real media pipeline with deterministic Fake MOSS', () => {
       }),
     ])
 
+    let unsafeRemoveCalls = 0
+    const versionlessStorage = wrapStorage({
+      statObject: async (objectKey, versionId) => ({
+        ...await storage.statObject(objectKey, versionId), versionId: null,
+      }),
+      remove: async (objectKey, versionId) => {
+        unsafeRemoveCalls += 1
+        return storage.remove(objectKey, versionId)
+      },
+    })
+    await expect(cleanupTranscriptObjects(database, versionlessStorage)).resolves.toMatchObject({ cleaned: 0, failed: 1 })
+    expect(unsafeRemoveCalls).toBe(0)
+    expect((await database.mediaObject.findUniqueOrThrow({ where: { id: pending.id } })).purgedAt).toBeNull()
+
     await expect(cleanupTranscriptObjects(database, storage)).resolves.toMatchObject({ cleaned: 1, failed: 0 })
     const purged = await database.mediaObject.findUniqueOrThrow({ where: { id: pending.id } })
     expect(purged.versionId).toBe(orphan.versionId)
@@ -683,9 +697,6 @@ describe('G3 real media pipeline with deterministic Fake MOSS', () => {
     const original = await database.mediaObject.findFirstOrThrow({
       where: { mediaAssetId: asset.id, kind: 'NORMALIZED_AUDIO' },
     })
-    const corruptPath = join(directory, 'corrupt-latest.wav')
-    await writeFile(corruptPath, 'not-a-valid-normalized-wave')
-    const corrupt = await storage.uploadFile(original.objectKey, corruptPath, 'audio/wav')
     await database.$transaction([
       database.processingChunk.deleteMany({ where: { processingRunId: run.id } }),
       database.processingRun.update({
@@ -695,7 +706,17 @@ describe('G3 real media pipeline with deterministic Fake MOSS', () => {
         },
       }),
     ])
-    const replacement = createTranscriptProcessor({ database, storage, moss, env, workerId: 'g3-version-replacement' })
+    const corruptingStorage = wrapStorage({
+      downloadFile: async (objectKey, filePath, versionId) => {
+        await storage.downloadFile(objectKey, filePath, versionId)
+        if (objectKey === original.objectKey && versionId === original.versionId) {
+          await writeFile(filePath, 'not-the-recorded-normalized-audio')
+        }
+      },
+    })
+    const replacement = createTranscriptProcessor({
+      database, storage: corruptingStorage, moss, env, workerId: 'g3-version-replacement',
+    })
     await expect(replacement({ mediaAssetId: asset.id, processingRunId: run.id })).resolves.toMatchObject({ waiting: true })
 
     const versions = await database.mediaObject.findMany({
@@ -708,10 +729,9 @@ describe('G3 real media pipeline with deterministic Fake MOSS', () => {
     expect(current.versionId).not.toBe(original.versionId)
     await expect(storage.statObject(original.objectKey, original.versionId)).resolves.toMatchObject({ versionId: original.versionId })
     await expect(storage.statObject(current.objectKey, current.versionId)).resolves.toMatchObject({ versionId: current.versionId })
-    await expect(storage.statObject(corrupt.objectKey, corrupt.versionId)).rejects.toBeTruthy()
   }, 120_000)
 
-  it('serializes overlapping uploads and prevents a stale worker from orphaning the replacement object', async () => {
+  it('lets a replacement adopt a committed object while the stale upload response is still delayed', async () => {
     const { asset, run } = await createRun(shortPath, 30_000, '17')
     const moss = new FakeMossAdapter()
     let releaseOldUpload!: () => void
@@ -741,13 +761,16 @@ describe('G3 real media pipeline with deterministic Fake MOSS', () => {
       await new Promise((resolve) => setTimeout(resolve, 50))
     }
     expect((await database.processingRun.findUniqueOrThrow({ where: { id: run.id } })).leaseOwner).toBe('g3-object-replacement')
+    await expect(replacementProcessing).resolves.toMatchObject({ waiting: true })
     releaseOldUpload()
     await expect(staleProcessing).resolves.toMatchObject({ skipped: true, leaseLost: true })
-    await expect(replacementProcessing).resolves.toMatchObject({ waiting: true })
     const normalized = await database.mediaObject.findMany({ where: { mediaAssetId: asset.id, kind: 'NORMALIZED_AUDIO' } })
     expect(normalized).toHaveLength(1)
-    expect((normalized[0].metadata as { uploadState?: string }).uploadState).toBe('READY')
-    await expect(storage.statObject(normalized[0].objectKey, normalized[0].versionId)).resolves.toMatchObject({ objectKey: normalized[0].objectKey })
+    const current = normalized[0]
+    expect(current.versionId).not.toBeNull()
+    expect(current.deletedAt).toBeNull()
+    expect((current.metadata as { uploadState?: string }).uploadState).toBe('READY')
+    await expect(storage.statObject(current.objectKey, current.versionId)).resolves.toMatchObject({ objectKey: current.objectKey })
   }, 120_000)
 
   it.each(['before-upload', 'after-upload'] as const)(
@@ -817,8 +840,9 @@ describe('G3 real media pipeline with deterministic Fake MOSS', () => {
         await expect(replacement({ mediaAssetId: asset.id, processingRunId: run.id })).resolves.toMatchObject({ waiting: true })
         expect(normalizedUploads).toBe(crashPoint === 'before-upload' ? 1 : 0)
         const recovered = await database.mediaObject.findMany({ where: { mediaAssetId: asset.id, kind: 'NORMALIZED_AUDIO' } })
-        expect(recovered).toHaveLength(1)
-        expect((recovered[0].metadata as { uploadState?: string }).uploadState).toBe('READY')
+        expect(recovered).toHaveLength(crashPoint === 'before-upload' ? 2 : 1)
+        expect(recovered.filter((item) => (item.metadata as { uploadState?: string }).uploadState === 'READY')).toHaveLength(1)
+        expect(recovered.filter((item) => item.versionId === null)).toHaveLength(crashPoint === 'before-upload' ? 1 : 0)
       } finally {
         await stopChild(child)
       }
@@ -834,10 +858,10 @@ describe('G3 real media pipeline with deterministic Fake MOSS', () => {
     const original = await database.mediaObject.findFirstOrThrow({
       where: { mediaAssetId: asset.id, kind: 'NORMALIZED_AUDIO' },
     })
-    const corruptPath = join(directory, 'existing-version-corrupt.wav')
-    await writeFile(corruptPath, 'force-the-replacement-upload-path')
-    const corrupt = await storage.uploadFile(original.objectKey, corruptPath, 'audio/wav')
     await database.$transaction([
+      database.mediaObject.update({
+        where: { id: original.id }, data: { checksumSha256: '0'.repeat(64) },
+      }),
       database.processingChunk.deleteMany({ where: { processingRunId: run.id } }),
       database.processingRun.update({
         where: { id: run.id }, data: {
@@ -895,7 +919,6 @@ describe('G3 real media pipeline with deterministic Fake MOSS', () => {
       expect(reserved).toHaveLength(2)
       expect(reserved.map((item) => item.versionId)).toEqual(expect.arrayContaining([original.versionId, null]))
       await expect(storage.statObject(original.objectKey, original.versionId)).resolves.toMatchObject({ versionId: original.versionId })
-      await expect(storage.statObject(corrupt.objectKey, corrupt.versionId)).rejects.toBeTruthy()
 
       await database.$transaction([
         database.processingRun.update({
@@ -906,10 +929,10 @@ describe('G3 real media pipeline with deterministic Fake MOSS', () => {
           data: { createdAt: new Date(Date.now() - 25 * 60 * 60_000) },
         }),
       ])
-      await expect(cleanupTranscriptObjects(database, storage)).resolves.toMatchObject({ cleaned: 1, failed: 0 })
+      await expect(cleanupTranscriptObjects(database, storage)).resolves.toMatchObject({ cleaned: 0, failed: 0 })
       expect(await database.mediaObject.count({
         where: { mediaAssetId: asset.id, kind: 'NORMALIZED_AUDIO', purgedAt: { not: null } },
-      })).toBe(1)
+      })).toBe(0)
       await expect(storage.statObject(original.objectKey, original.versionId)).resolves.toMatchObject({ versionId: original.versionId })
 
       await database.mediaObject.update({
@@ -917,6 +940,9 @@ describe('G3 real media pipeline with deterministic Fake MOSS', () => {
       })
       await expect(cleanupTranscriptObjects(database, storage)).resolves.toMatchObject({ cleaned: 1, failed: 0 })
       await expect(storage.statObject(original.objectKey, original.versionId)).rejects.toBeTruthy()
+      expect((await database.mediaObject.findFirstOrThrow({
+        where: { mediaAssetId: asset.id, kind: 'NORMALIZED_AUDIO', versionId: null },
+      })).purgedAt).toBeNull()
     } finally {
       await stopChild()
     }

@@ -10,7 +10,7 @@ function metadataRunId(value: Prisma.JsonValue | null) {
 
 function isMissingObject(error: unknown) {
   return typeof error === 'object' && error !== null && 'code' in error
-    && ['NoSuchKey', 'NoSuchVersion'].includes(String((error as { code?: unknown }).code))
+    && ['NoSuchKey', 'NoSuchVersion', 'NotFound'].includes(String((error as { code?: unknown }).code))
 }
 
 export async function cleanupTranscriptObjects(
@@ -18,6 +18,8 @@ export async function cleanupTranscriptObjects(
   storage: MultipartStorageProvider,
   now = new Date(),
 ) {
+  await storage.ensureBucket()
+  await storage.ensureVersioning()
   const candidates = await database.mediaObject.findMany({
     where: {
       kind: { in: ['NORMALIZED_AUDIO', 'AUDIO_CHUNK', 'ASR_RAW'] },
@@ -67,6 +69,7 @@ export async function cleanupTranscriptObjects(
         } else {
           try {
             const latest = await storage.statObject(current.objectKey, null)
+            if (!latest.versionId) throw new Error('object_store_version_required')
             const tracked = await transaction.mediaObject.findFirst({
               where: {
                 id: { not: current.id },
@@ -81,9 +84,12 @@ export async function cleanupTranscriptObjects(
             } else if (!tracked) {
               await storage.remove(current.objectKey, latest.versionId)
               removedVersionId = latest.versionId
+            } else {
+              return false
             }
           } catch (error) {
-            if (!isMissingObject(error)) throw error
+            if (isMissingObject(error)) return false
+            throw error
           }
         }
         const finalized = await transaction.mediaObject.updateMany({

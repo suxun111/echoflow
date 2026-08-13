@@ -127,6 +127,12 @@ function recordMetadata(value: Prisma.JsonValue | null) {
 
 export function createTranscriptProcessor(options: TranscriptProcessorOptions) {
   const now = options.now ?? (() => new Date())
+  let storageReady: Promise<void> | null = null
+
+  function ensureVersionedStorage() {
+    storageReady ??= options.storage.ensureBucket().then(() => options.storage.ensureVersioning())
+    return storageReady
+  }
 
   async function assertLease(runId: string) {
     const run = await options.database.processingRun.findFirst({
@@ -148,19 +154,146 @@ export function createTranscriptProcessor(options: TranscriptProcessorOptions) {
     runId: string,
     mediaAssetId: string,
     kind: 'NORMALIZED_AUDIO' | 'AUDIO_CHUNK' | 'ASR_RAW',
-    objectKey: string,
+    logicalObjectKey: string,
     filePath: string,
     contentType: string,
     checksumSha256: string,
     metadata: Record<string, Prisma.InputJsonValue>,
   ) {
     const expectedSize = (await stat(filePath)).size
-    const objectIdentity = `${options.storage.bucket}:${objectKey}`
-    // Reserve the stable identity in a short independent transaction. Do not nest this
-    // transaction inside the long object-store transaction: production pools must also
-    // work with a single available connection.
+    const logicalIdentity = `${options.storage.bucket}:${logicalObjectKey}`
+    const sameLogicalIdentity = (candidate: { objectKey: string; metadata: Prisma.JsonValue | null }) => {
+      const candidateMetadata = recordMetadata(candidate.metadata)
+      return candidate.objectKey === logicalObjectKey || candidateMetadata.logicalObjectKey === logicalObjectKey
+    }
+    const exactVersion = (object: StoredObject) => {
+      if (!object.versionId) throw new Error('object_store_version_required')
+      return object.versionId
+    }
+    const activateInTransaction = async (
+      transaction: Prisma.TransactionClient,
+      recordId: string,
+      object: StoredObject,
+    ) => {
+      const versionId = exactVersion(object)
+      await transaction.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${logicalIdentity}, 0))`
+      const fenced = await transaction.processingRun.updateMany({
+        where: {
+          id: runId, mediaAssetId, status: 'PROCESSING', leaseOwner: options.workerId,
+          leaseExpiresAt: { gt: now() },
+        },
+        data: { leaseExpiresAt: new Date(now().getTime() + 5 * 60_000) },
+      })
+      if (fenced.count !== 1) throw new TranscriptLeaseLostError('tracked_object_fence_lost')
+      const current = await transaction.mediaObject.findUniqueOrThrow({ where: { id: recordId } })
+      if (current.versionId && current.versionId !== versionId) throw new Error('tracked_object_version_conflict')
+      let activeRecordId = current.id
+      if (!(current.versionId === versionId && recordMetadata(current.metadata).uploadState === 'READY')) {
+        const adopted = await transaction.mediaObject.findFirst({
+          where: {
+            id: { not: current.id }, bucket: options.storage.bucket,
+            objectKey: object.objectKey, versionId,
+          },
+          select: { id: true },
+        })
+        if (adopted) {
+          if (!current.versionId) await transaction.mediaObject.delete({ where: { id: current.id } })
+          await transaction.mediaObject.update({
+            where: { id: adopted.id },
+            data: {
+              contentType: object.contentType ?? contentType, sizeBytes: BigInt(object.sizeBytes),
+              etag: object.etag, checksumSha256, metadata: {
+                ...metadata, logicalObjectKey, uploadState: 'READY', activatedBy: options.workerId,
+              },
+            },
+          })
+          activeRecordId = adopted.id
+        } else {
+          await transaction.mediaObject.update({
+            where: { id: current.id },
+            data: {
+              versionId, contentType: object.contentType ?? contentType,
+              sizeBytes: BigInt(object.sizeBytes), etag: object.etag, checksumSha256,
+              metadata: { ...metadata, logicalObjectKey, uploadState: 'READY', activatedBy: options.workerId },
+            },
+          })
+        }
+      }
+      const records = await transaction.mediaObject.findMany({
+        where: { mediaAssetId, kind, bucket: options.storage.bucket, deletedAt: null },
+        select: { id: true, objectKey: true, metadata: true },
+      })
+      const retiredIds = records
+        .filter((candidate) => candidate.id !== activeRecordId && sameLogicalIdentity(candidate))
+        .map((candidate) => candidate.id)
+      if (retiredIds.length) {
+        await transaction.mediaObject.updateMany({
+          where: { id: { in: retiredIds }, deletedAt: null }, data: { deletedAt: now() },
+        })
+      }
+      await transaction.mediaObject.update({
+        where: { id: activeRecordId }, data: { createdAt: now(), deletedAt: null, purgedAt: null },
+      })
+      return object
+    }
+
+    const activate = (recordId: string, object: StoredObject) => options.database.$transaction(async (transaction) => {
+      const objectIdentity = `${options.storage.bucket}:${object.objectKey}`
+      await transaction.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${objectIdentity}, 0))`
+      return activateInTransaction(transaction, recordId, object)
+    }, { maxWait: 10_000, timeout: 30_000 })
+
+    const candidates = (await options.database.mediaObject.findMany({
+      where: { mediaAssetId, kind, bucket: options.storage.bucket, deletedAt: null, purgedAt: null },
+      orderBy: { createdAt: 'desc' },
+    })).filter(sameLogicalIdentity)
+    for (const candidate of candidates) {
+      if (candidate.checksumSha256 !== checksumSha256 || Number(candidate.sizeBytes) !== expectedSize) continue
+      try {
+        const reused = await options.database.$transaction(async (transaction) => {
+          const objectIdentity = `${options.storage.bucket}:${candidate.objectKey}`
+          await transaction.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${objectIdentity}, 0))`
+          const current = await transaction.mediaObject.findFirst({
+            where: { id: candidate.id, deletedAt: null, purgedAt: null },
+          })
+          if (!current) return null
+          const existing = await options.storage.statObject(current.objectKey, current.versionId)
+          exactVersion(existing)
+          const verificationPath = `${filePath}.remote-${randomUUID()}`
+          try {
+            await options.storage.downloadFile(existing.objectKey, verificationPath, existing.versionId)
+            if (await checksum(await readFile(verificationPath)) === checksumSha256) {
+              return activateInTransaction(transaction, current.id, existing)
+            }
+          } finally {
+            await rm(verificationPath, { force: true })
+          }
+          const active = await transaction.processingRun.findFirst({
+            where: {
+              id: runId, mediaAssetId, status: 'PROCESSING', leaseOwner: options.workerId,
+              leaseExpiresAt: { gt: now() },
+            },
+            select: { id: true },
+          })
+          if (!active) throw new TranscriptLeaseLostError('transcript_lease_lost')
+          await transaction.mediaObject.updateMany({
+            where: { id: current.id, deletedAt: null }, data: { deletedAt: now() },
+          })
+          return null
+        }, { maxWait: 10 * 60_000, timeout: 30 * 60_000 })
+        if (reused) return reused
+      } catch (error) {
+        if (!isMissingObject(error)) throw error
+      }
+    }
+
+    const separator = logicalObjectKey.lastIndexOf('/')
+    const directory = separator >= 0 ? logicalObjectKey.slice(0, separator) : ''
+    const filename = separator >= 0 ? logicalObjectKey.slice(separator + 1) : logicalObjectKey
+    const attemptId = randomUUID()
+    const objectKey = `${directory ? `${directory}/` : ''}attempts/${attemptId}/${filename}`
     const record = await options.database.$transaction(async (reservation) => {
-      await reservation.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${objectIdentity}, 0))`
+      await reservation.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${logicalIdentity}, 0))`
       const active = await reservation.processingRun.findFirst({
         where: {
           id: runId, mediaAssetId, status: 'PROCESSING', leaseOwner: options.workerId,
@@ -169,129 +302,22 @@ export function createTranscriptProcessor(options: TranscriptProcessorOptions) {
         select: { id: true },
       })
       if (!active) throw new TranscriptLeaseLostError('transcript_lease_lost')
-      const records = await reservation.mediaObject.findMany({
-        where: { mediaAssetId, bucket: options.storage.bucket, objectKey },
-        orderBy: { createdAt: 'desc' },
-      })
-      if (records.some((candidate) => candidate.kind !== kind)) throw new Error('tracked_object_identity_conflict')
-      const pending = records.find((candidate) => candidate.versionId === null)
-      if (!pending) {
-        return reservation.mediaObject.create({
-          data: {
-            mediaAssetId, kind, bucket: options.storage.bucket, objectKey, versionId: null,
-            contentType, sizeBytes: BigInt(expectedSize), checksumSha256,
-            metadata: { ...metadata, uploadState: 'PENDING' },
-          },
-        })
-      }
-      return reservation.mediaObject.update({
-        where: { id: pending.id },
+      return reservation.mediaObject.create({
         data: {
-          kind, contentType, sizeBytes: BigInt(expectedSize), checksumSha256, etag: null,
-          createdAt: now(), deletedAt: null, purgedAt: null, metadata: { ...metadata, uploadState: 'PENDING' },
+          mediaAssetId, kind, bucket: options.storage.bucket, objectKey, versionId: null,
+          contentType, sizeBytes: BigInt(expectedSize), checksumSha256,
+          metadata: {
+            ...metadata, logicalObjectKey, uploadAttemptId: attemptId,
+            uploadAttemptOwner: options.workerId, uploadState: 'PENDING',
+          },
         },
       })
     }, { maxWait: 10_000, timeout: 30_000 })
 
-    return options.database.$transaction(async (transaction) => {
-      await transaction.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${objectIdentity}, 0))`
-      const active = await transaction.processingRun.findFirst({
-        where: {
-          id: runId, mediaAssetId, status: 'PROCESSING', leaseOwner: options.workerId,
-          leaseExpiresAt: { gt: now() },
-        },
-        select: { id: true },
-      })
-      if (!active) throw new TranscriptLeaseLostError('transcript_lease_lost')
-
-      let object: StoredObject | null = null
-      let uploadedByThisAttempt: StoredObject | null = null
-      try {
-        try {
-          const existing = await options.storage.statObject(objectKey, null)
-          if (existing.sizeBytes === expectedSize) {
-            const verificationPath = `${filePath}.remote-${randomUUID()}`
-            try {
-              await options.storage.downloadFile(objectKey, verificationPath, existing.versionId)
-              if (await checksum(await readFile(verificationPath)) === checksumSha256) object = existing
-            } finally {
-              await rm(verificationPath, { force: true })
-            }
-          }
-          if (!object) {
-            await options.storage.remove(objectKey, existing.versionId)
-            await transaction.mediaObject.updateMany({
-              where: {
-                bucket: options.storage.bucket, objectKey, versionId: existing.versionId,
-                purgedAt: null,
-              },
-              data: { deletedAt: now(), purgedAt: now() },
-            })
-          }
-        } catch (error) {
-          if (!isMissingObject(error)) throw error
-        }
-        if (!object) {
-          uploadedByThisAttempt = await options.storage.uploadFile(objectKey, filePath, contentType)
-          object = uploadedByThisAttempt
-        }
-        if (object.sizeBytes !== expectedSize) throw new Error('tracked_object_size_mismatch')
-
-        const fenced = await transaction.processingRun.updateMany({
-          where: {
-            id: runId, mediaAssetId, status: 'PROCESSING', leaseOwner: options.workerId,
-            leaseExpiresAt: { gt: now() },
-          },
-          data: { leaseExpiresAt: new Date(now().getTime() + 5 * 60_000) },
-        })
-        if (fenced.count !== 1) {
-          if (uploadedByThisAttempt) {
-            await options.storage.remove(uploadedByThisAttempt.objectKey, uploadedByThisAttempt.versionId).catch(() => undefined)
-          }
-          throw new TranscriptLeaseLostError('tracked_object_fence_lost')
-        }
-        const adopted = object.versionId
-          ? await transaction.mediaObject.findFirst({
-              where: {
-                bucket: options.storage.bucket, objectKey, versionId: object.versionId,
-                id: { not: record.id },
-              },
-            })
-          : null
-        if (adopted) {
-          await transaction.mediaObject.delete({ where: { id: record.id } })
-          await transaction.mediaObject.update({
-            where: { id: adopted.id },
-            data: {
-              contentType: object.contentType ?? contentType, sizeBytes: BigInt(object.sizeBytes),
-              etag: object.etag, checksumSha256, createdAt: now(), deletedAt: null, purgedAt: null,
-              metadata: { ...metadata, uploadState: 'READY' },
-            },
-          })
-          return object
-        }
-        await transaction.mediaObject.updateMany({
-          where: {
-            mediaAssetId, bucket: options.storage.bucket, objectKey,
-            id: { not: record.id }, deletedAt: null,
-          },
-          data: { deletedAt: now() },
-        })
-        await transaction.mediaObject.update({
-          where: { id: record.id },
-          data: {
-            versionId: object.versionId, contentType: object.contentType ?? contentType,
-            sizeBytes: BigInt(object.sizeBytes), etag: object.etag, checksumSha256,
-            metadata: { ...metadata, uploadState: 'READY' },
-          },
-        })
-        return object
-      } catch (error) {
-        // Do not remove after releasing the advisory lock: a replacement could already
-        // have adopted that version. The durable PENDING row makes unknown outcomes recoverable.
-        throw error
-      }
-    }, { maxWait: 10 * 60_000, timeout: 30 * 60_000 })
+    const uploaded = await options.storage.uploadFile(objectKey, filePath, contentType)
+    exactVersion(uploaded)
+    if (uploaded.sizeBytes !== expectedSize) throw new Error('tracked_object_size_mismatch')
+    return activate(record.id, uploaded)
   }
 
   async function prepareAudio(run: {
@@ -808,6 +834,7 @@ export function createTranscriptProcessor(options: TranscriptProcessorOptions) {
   }
 
   return async (job: TranscriptJob) => {
+    await ensureVersionedStorage()
     const claimed = await options.database.processingRun.updateMany({
       where: {
         id: job.processingRunId, mediaAssetId: job.mediaAssetId, pipelineVersion: G3_PIPELINE_VERSION,
