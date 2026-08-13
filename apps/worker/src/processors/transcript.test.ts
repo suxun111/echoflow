@@ -303,6 +303,24 @@ describe('G3 real media pipeline with deterministic Fake MOSS', () => {
     expect((await database.processingRun.findUniqueOrThrow({ where: { id: run.id } })).leaseExpiresAt).toEqual(expired)
   })
 
+  it('recovers storage initialization after a transient versioning failure without restarting the processor', async () => {
+    const { asset, run } = await createRun(shortPath, 30_000, '28')
+    let ensureVersioningCalls = 0
+    const transientStorage = wrapStorage({
+      ensureVersioning: async () => {
+        ensureVersioningCalls += 1
+        if (ensureVersioningCalls === 1) throw new Error('transient_versioning_failure')
+        return storage.ensureVersioning()
+      },
+    })
+    const processor = createTranscriptProcessor({
+      database, storage: transientStorage, moss: new FakeMossAdapter(), env, workerId: 'g3-storage-recovery',
+    })
+    await expect(processor({ mediaAssetId: asset.id, processingRunId: run.id })).rejects.toThrow('transient_versioning_failure')
+    await expect(processor({ mediaAssetId: asset.id, processingRunId: run.id })).resolves.toMatchObject({ waiting: true })
+    expect(ensureVersioningCalls).toBe(2)
+  }, 120_000)
+
   it('persists and cancels a MOSS job when cancellation commits while submit is in flight', async () => {
     const { asset, run } = await createRun(shortPath, 30_000, '5')
     const delegate = new FakeMossAdapter()
@@ -689,6 +707,54 @@ describe('G3 real media pipeline with deterministic Fake MOSS', () => {
     await expect(storage.statObject(pending.objectKey, orphan.versionId)).rejects.toBeTruthy()
   }, 120_000)
 
+  it('reopens a missing PENDING fact when its upload arrives after terminal cleanup, then removes the exact version', async () => {
+    const { asset, run } = await createRun(shortPath, 30_000, '29')
+    let releaseUpload!: () => void
+    let signalUpload!: () => void
+    const uploadGate = new Promise<void>((resolve) => { releaseUpload = resolve })
+    const uploadStarted = new Promise<void>((resolve) => { signalUpload = resolve })
+    const delayedStorage = wrapStorage({
+      uploadFile: async (objectKey, filePath, contentType) => {
+        if (objectKey.endsWith('/normalized.wav')) {
+          signalUpload()
+          await uploadGate
+        }
+        return storage.uploadFile(objectKey, filePath, contentType)
+      },
+    })
+    const processor = createTranscriptProcessor({
+      database, storage: delayedStorage, moss: new FakeMossAdapter(), env, workerId: 'g3-late-upload',
+    })
+    const processing = processor({ mediaAssetId: asset.id, processingRunId: run.id })
+    await uploadStarted
+    const pending = await database.mediaObject.findFirstOrThrow({
+      where: { mediaAssetId: asset.id, kind: 'NORMALIZED_AUDIO', versionId: null },
+    })
+    await database.$transaction([
+      database.processingRun.update({
+        where: { id: run.id },
+        data: { status: 'CANCELLED', errorCode: 'processing_cancelled', leaseOwner: null, leaseExpiresAt: null },
+      }),
+      database.mediaObject.update({
+        where: { id: pending.id }, data: { createdAt: new Date(Date.now() - 25 * 60 * 60_000) },
+      }),
+    ])
+    await expect(cleanupTranscriptObjects(database, storage)).resolves.toMatchObject({ cleaned: 1, failed: 0 })
+    expect((await database.mediaObject.findUniqueOrThrow({ where: { id: pending.id } })).purgedAt).not.toBeNull()
+
+    releaseUpload()
+    await expect(processing).resolves.toMatchObject({ skipped: true, leaseLost: true })
+    const arrived = await database.mediaObject.findUniqueOrThrow({ where: { id: pending.id } })
+    expect(arrived.versionId).not.toBeNull()
+    expect(arrived.deletedAt).not.toBeNull()
+    expect(arrived.purgedAt).toBeNull()
+    await expect(storage.statObject(arrived.objectKey, arrived.versionId)).resolves.toMatchObject({ versionId: arrived.versionId })
+
+    await expect(cleanupTranscriptObjects(database, storage)).resolves.toMatchObject({ cleaned: 1, failed: 0 })
+    expect((await database.mediaObject.findUniqueOrThrow({ where: { id: pending.id } })).purgedAt).not.toBeNull()
+    await expect(storage.statObject(arrived.objectKey, arrived.versionId)).rejects.toBeTruthy()
+  }, 120_000)
+
   it('preserves database identities for every surviving object version when replacing corrupted latest data', async () => {
     const { asset, run } = await createRun(shortPath, 30_000, '25')
     const moss = new FakeMossAdapter()
@@ -748,19 +814,21 @@ describe('G3 real media pipeline with deterministic Fake MOSS', () => {
         return uploaded
       },
     })
-    const stale = createTranscriptProcessor({ database, storage: staleStorage, moss, env, workerId: 'g3-object-stale' })
-    const staleProcessing = stale({ mediaAssetId: asset.id, processingRunId: run.id })
+    const processor = createTranscriptProcessor({ database, storage: staleStorage, moss, env, workerId: 'g3-shared-process' })
+    const staleProcessing = processor({ mediaAssetId: asset.id, processingRunId: run.id })
     await oldUploadStarted
+    const staleLease = (await database.processingRun.findUniqueOrThrow({ where: { id: run.id } })).leaseOwner
     await database.processingRun.update({ where: { id: run.id }, data: { leaseExpiresAt: new Date(0) } })
-    const replacement = createTranscriptProcessor({ database, storage, moss, env, workerId: 'g3-object-replacement' })
-    const replacementProcessing = replacement({ mediaAssetId: asset.id, processingRunId: run.id })
+    const replacementProcessing = processor({ mediaAssetId: asset.id, processingRunId: run.id })
     const deadline = Date.now() + 10_000
     while (Date.now() < deadline) {
       const current = await database.processingRun.findUniqueOrThrow({ where: { id: run.id } })
-      if (current.leaseOwner === 'g3-object-replacement') break
+      if (current.leaseOwner?.startsWith('g3-shared-process:') && current.leaseOwner !== staleLease) break
       await new Promise((resolve) => setTimeout(resolve, 50))
     }
-    expect((await database.processingRun.findUniqueOrThrow({ where: { id: run.id } })).leaseOwner).toBe('g3-object-replacement')
+    const replacementLease = (await database.processingRun.findUniqueOrThrow({ where: { id: run.id } })).leaseOwner
+    expect(replacementLease).toMatch(/^g3-shared-process:/)
+    expect(replacementLease).not.toBe(staleLease)
     await expect(replacementProcessing).resolves.toMatchObject({ waiting: true })
     releaseOldUpload()
     await expect(staleProcessing).resolves.toMatchObject({ skipped: true, leaseLost: true })
@@ -929,10 +997,10 @@ describe('G3 real media pipeline with deterministic Fake MOSS', () => {
           data: { createdAt: new Date(Date.now() - 25 * 60 * 60_000) },
         }),
       ])
-      await expect(cleanupTranscriptObjects(database, storage)).resolves.toMatchObject({ cleaned: 0, failed: 0 })
+      await expect(cleanupTranscriptObjects(database, storage)).resolves.toMatchObject({ cleaned: 1, failed: 0 })
       expect(await database.mediaObject.count({
         where: { mediaAssetId: asset.id, kind: 'NORMALIZED_AUDIO', purgedAt: { not: null } },
-      })).toBe(0)
+      })).toBe(1)
       await expect(storage.statObject(original.objectKey, original.versionId)).resolves.toMatchObject({ versionId: original.versionId })
 
       await database.mediaObject.update({
@@ -942,7 +1010,7 @@ describe('G3 real media pipeline with deterministic Fake MOSS', () => {
       await expect(storage.statObject(original.objectKey, original.versionId)).rejects.toBeTruthy()
       expect((await database.mediaObject.findFirstOrThrow({
         where: { mediaAssetId: asset.id, kind: 'NORMALIZED_AUDIO', versionId: null },
-      })).purgedAt).toBeNull()
+      })).purgedAt).not.toBeNull()
     } finally {
       await stopChild()
     }

@@ -88,7 +88,13 @@ export async function cleanupTranscriptObjects(
               return false
             }
           } catch (error) {
-            if (isMissingObject(error)) return false
+            if (isMissingObject(error)) {
+              const finalized = await transaction.mediaObject.updateMany({
+                where: { id: current.id, versionId: null, purgedAt: null },
+                data: { purgedAt: now },
+              })
+              return finalized.count === 1
+            }
             throw error
           }
         }
