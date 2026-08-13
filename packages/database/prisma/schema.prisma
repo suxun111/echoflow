@@ -233,6 +233,7 @@ model MediaObject {
   metadata       Json?
   createdAt      DateTime        @default(now())
   deletedAt      DateTime?
+  purgedAt       DateTime?
   mediaAsset     MediaAsset      @relation(fields: [mediaAssetId], references: [id], onDelete: Cascade)
 
   @@unique([bucket, objectKey, versionId])
@@ -260,7 +261,10 @@ model ProcessingRun {
   owner           User              @relation(fields: [ownerId], references: [id], onDelete: Cascade)
   mediaAsset      MediaAsset        @relation(fields: [mediaAssetId, ownerId], references: [id, ownerId], onDelete: Cascade)
   chunks          ProcessingChunk[]
+  transcriptVersions TranscriptVersion[]
 
+  @@unique([mediaAssetId, pipelineVersion])
+  @@unique([id, mediaAssetId])
   @@index([ownerId, status])
   @@index([status, leaseExpiresAt])
   @@index([mediaAssetId, createdAt])
@@ -274,16 +278,50 @@ model ProcessingChunk {
   endMs           Int
   status          ProcessingStatus @default(QUEUED)
   attempt         Int              @default(0)
-  externalJobId   String?          @db.VarChar(512)
+  idempotencyKey  String           @unique @db.VarChar(512)
+  modelVersion    String           @db.VarChar(128)
+  externalJobId   String?          @unique @db.VarChar(512)
   inputObjectKey  String           @db.VarChar(1024)
+  inputVersionId  String?          @db.VarChar(512)
   resultObjectKey String?          @db.VarChar(1024)
+  resultVersionId String?          @db.VarChar(512)
+  resultChecksum  String?          @db.Char(64)
+  wordCount       Int              @default(0)
+  errorDetail     Json?
+  leaseOwner      String?          @db.VarChar(255)
+  leaseExpiresAt  DateTime?
+  nextPollAt      DateTime?
+  submittedAt     DateTime?
+  externalUpdatedAt DateTime?
+  externalCancelledAt DateTime?
+  completedAt     DateTime?
+  failedAt        DateTime?
   errorCode       String?          @db.VarChar(128)
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
   processingRun   ProcessingRun    @relation(fields: [processingRunId], references: [id], onDelete: Cascade)
+  callbackReceipts MossCallbackReceipt[]
 
   @@unique([processingRunId, chunkIndex])
   @@index([status, updatedAt])
+  @@index([status, nextPollAt])
+}
+
+model MossCallbackReceipt {
+  eventId          String           @id @db.VarChar(255)
+  nonce            String           @unique @db.VarChar(255)
+  processingChunkId String?         @db.Uuid
+  externalJobId    String           @db.VarChar(512)
+  idempotencyKey   String           @db.VarChar(512)
+  payloadHash      String           @db.Char(64)
+  externalStatus   String           @db.VarChar(64)
+  occurredAt       DateTime
+  receivedAt       DateTime         @default(now())
+  processedAt      DateTime?
+  processingChunk ProcessingChunk? @relation(fields: [processingChunkId], references: [id], onDelete: SetNull)
+
+  @@index([externalJobId, receivedAt])
+  @@index([processingChunkId, receivedAt])
 }
 
 model OutboxEvent {
@@ -308,14 +346,18 @@ model OutboxEvent {
 model TranscriptVersion {
   id            String           @id @default(uuid()) @db.Uuid
   mediaAssetId  String           @db.Uuid
+  processingRunId String         @unique @db.Uuid
   version       Int
   language      String           @default("en") @db.VarChar(16)
+  pipelineVersion String         @db.VarChar(128)
+  modelVersion String            @db.VarChar(128)
   status        TranscriptStatus @default(BUILDING)
   durationMs    Int
   cueCount      Int              @default(0)
   publishedAt   DateTime?
   createdAt     DateTime         @default(now())
   mediaAsset    MediaAsset       @relation(fields: [mediaAssetId], references: [id], onDelete: Cascade)
+  processingRun ProcessingRun    @relation(fields: [processingRunId, mediaAssetId], references: [id, mediaAssetId], onDelete: Restrict)
   cues          SubtitleCue[]
   privateLesson PrivateLesson?
 

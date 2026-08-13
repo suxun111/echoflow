@@ -86,6 +86,7 @@
 ```text
 GET  /api/v1/media-assets/:mediaAssetId
 POST /api/v1/media-assets/:mediaAssetId/transcript/retry
+POST /api/v1/media-assets/:mediaAssetId/transcript/cancel
 GET  /api/v1/media-assets/:mediaAssetId/transcript
 ```
 

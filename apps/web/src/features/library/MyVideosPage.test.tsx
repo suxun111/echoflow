@@ -44,4 +44,59 @@ describe('G2 signed playback recovery', () => {
     await screen.findByText('播放地址刷新后仍不可用，请稍后重试')
     expect(signed).toBe(2)
   })
+
+  it('shows persisted chunk counts and opens only the ACTIVE complete transcript', async () => {
+    const ready = {
+      ...asset,
+      transcriptProcessing: {
+        status: 'succeeded' as const, stage: 'transcript_ready' as const,
+        completedChunks: 3, totalChunks: 3, errorCode: null, updatedAt: new Date().toISOString(),
+      },
+    }
+    const transcript = {
+      id: crypto.randomUUID(), mediaAssetId: ready.id, version: 1, language: 'en' as const,
+      durationMs: ready.durationMs!, cueCount: 1, pipelineVersion: 'g3-transcript-v1', modelVersion: 'fake-moss-v1',
+      publishedAt: new Date().toISOString(),
+      cues: [{
+        id: crypto.randomUUID(), order: 0, startMs: 500, endMs: 1_500, text: 'Hello podcast.',
+        words: [{ text: 'Hello', startMs: 500, endMs: 900 }, { text: 'podcast.', startMs: 1_000, endMs: 1_500 }],
+      }],
+    }
+    const api = { fetchJson: vi.fn(async (path: string) => {
+      if (path === '/media-assets') return { items: [ready] }
+      if (path === `/media-assets/${ready.id}/transcript`) return transcript
+      throw new Error(`unexpected ${path}`)
+    }) }
+    render(<MyVideosPage api={api as never} search="" onUpload={vi.fn()}/>)
+    await screen.findByText('完整英文逐词字幕已经原子发布')
+    fireEvent.click(screen.getByRole('button', { name: '查看字幕' }))
+    await screen.findByText('Hello podcast.')
+    expect(screen.getByText('1 句 · MOSS fake-moss-v1')).toBeInTheDocument()
+  })
+
+  it('keeps the original playable on transcript failure and sends an idempotent retry', async () => {
+    const failed = {
+      ...asset,
+      transcriptProcessing: {
+        status: 'failed' as const, stage: 'transcribing' as const,
+        completedChunks: 1, totalChunks: 2, errorCode: 'moss_timeout', updatedAt: new Date().toISOString(),
+      },
+    }
+    const api = { fetchJson: vi.fn(async (path: string, options?: RequestInit) => {
+      if (path === '/media-assets') return { items: [failed] }
+      if (path.endsWith('/transcript/retry')) {
+        expect(options?.method).toBe('POST')
+        expect(new Headers(options?.headers).get('idempotency-key')).toMatch(/^web-/)
+        return { accepted: true }
+      }
+      throw new Error(`unexpected ${path}`)
+    }) }
+    render(<MyVideosPage api={api as never} search="" onUpload={vi.fn()}/>)
+    await screen.findByText('原片仍可播放 · moss_timeout')
+    expect(screen.getByRole('button', { name: '播放原片' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '重试字幕' }))
+    await waitFor(() => expect(api.fetchJson).toHaveBeenCalledWith(
+      `/media-assets/${failed.id}/transcript/retry`, expect.objectContaining({ method: 'POST' }),
+    ))
+  })
 })

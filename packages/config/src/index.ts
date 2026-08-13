@@ -33,9 +33,28 @@ export const ServerEnvSchema = z.object({
   STORAGE_SIGNED_URL_TTL_SECONDS: z.coerce.number().int().min(60).max(3600).default(15 * 60),
   FFPROBE_PATH: z.string().min(1).default('ffprobe'),
   FFMPEG_PATH: z.string().min(1).default('ffmpeg'),
+  MOSS_ENABLED: BooleanStringSchema.default('false'),
+  MOSS_BASE_URL: z.string().url().optional(),
+  MOSS_API_TOKEN: z.string().min(16).optional(),
+  MOSS_CALLBACK_SECRET: z.string().min(32).optional(),
+  MOSS_CALLBACK_PUBLIC_URL: z.string().url().optional(),
+  MOSS_MODEL_VERSION: z.string().min(1).max(128).default('moss-default'),
+  MOSS_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(5 * 60_000).default(30_000),
+  MOSS_JOB_TIMEOUT_SECONDS: z.coerce.number().int().min(60).max(24 * 3600).default(6 * 3600),
+  MOSS_POLL_INTERVAL_SECONDS: z.coerce.number().int().min(5).max(600).default(30),
+  MOSS_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(10).default(5),
+  MOSS_CHUNK_TARGET_SECONDS: z.coerce.number().int().min(60).max(30 * 60).default(10 * 60),
+  MOSS_CHUNK_OVERLAP_SECONDS: z.coerce.number().int().min(0).max(30).default(2),
+  MOSS_AUDIO_URL_TTL_SECONDS: z.coerce.number().int().min(60).max(3600).default(15 * 60),
+  MOSS_CALLBACK_MAX_AGE_SECONDS: z.coerce.number().int().min(30).max(900).default(5 * 60),
 }).superRefine((env, context) => {
   if (new URL(env.DATABASE_URL).pathname === '/online_learning') {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ['DATABASE_URL'], message: '历史 online_learning 数据库受保护，请使用独立 echoflow 数据库' })
+  }
+  if (env.MOSS_ENABLED) {
+    for (const key of ['MOSS_BASE_URL', 'MOSS_API_TOKEN', 'MOSS_CALLBACK_SECRET', 'MOSS_CALLBACK_PUBLIC_URL'] as const) {
+      if (!env[key]) context.addIssue({ code: z.ZodIssueCode.custom, path: [key], message: '启用 MOSS 时必须显式配置' })
+    }
   }
   if (env.NODE_ENV !== 'production') return
   if (env.AUTH_EXPOSE_TEST_OTP) context.addIssue({ code: z.ZodIssueCode.custom, path: ['AUTH_EXPOSE_TEST_OTP'], message: '生产环境禁止返回测试 OTP' })
@@ -44,6 +63,20 @@ export const ServerEnvSchema = z.object({
   if (env.CORS_ALLOWED_ORIGINS.some((origin) => origin === '*')) context.addIssue({ code: z.ZodIssueCode.custom, path: ['CORS_ALLOWED_ORIGINS'], message: '生产 CORS 禁止通配符' })
   for (const key of ['ACCESS_TOKEN_SECRET', 'REFRESH_TOKEN_PEPPER', 'OTP_HMAC_SECRET'] as const) {
     if (/development|replace|change-me|example/i.test(env[key])) context.addIssue({ code: z.ZodIssueCode.custom, path: [key], message: '生产环境禁止示例 Secret' })
+  }
+  for (const key of ['MOSS_API_TOKEN', 'MOSS_CALLBACK_SECRET'] as const) {
+    const value = env[key]
+    if (env.MOSS_ENABLED && value && /development|replace|change-me|example/i.test(value)) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: [key], message: '生产环境禁止示例 MOSS Secret' })
+    }
+  }
+  if (env.MOSS_ENABLED) {
+    for (const key of ['MOSS_BASE_URL', 'MOSS_CALLBACK_PUBLIC_URL'] as const) {
+      const value = env[key]
+      if (value && new URL(value).protocol !== 'https:') {
+        context.addIssue({ code: z.ZodIssueCode.custom, path: [key], message: '生产 MOSS 连接必须使用 HTTPS' })
+      }
+    }
   }
 })
 

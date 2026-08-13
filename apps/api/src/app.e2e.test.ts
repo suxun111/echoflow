@@ -1,4 +1,5 @@
 import 'reflect-metadata'
+import { createHmac } from 'node:crypto'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -51,7 +52,7 @@ describe('EchoFlow real PostgreSQL, auth, upload and owner boundary', () => {
     await database.$executeRawUnsafe(`
       TRUNCATE TABLE
         "AuditEvent", "IdempotencyRecord", "LearningProgress", "LearningUnit", "PrivateLesson",
-        "SubtitleCue", "TranscriptVersion", "OutboxEvent", "ProcessingChunk", "ProcessingRun",
+        "SubtitleCue", "TranscriptVersion", "OutboxEvent", "MossCallbackReceipt", "ProcessingChunk", "ProcessingRun",
         "MediaObject", "MediaAsset", "UploadPart", "UploadSession", "RefreshSession",
         "OtpChallenge", "User"
       CASCADE
@@ -331,15 +332,29 @@ describe('EchoFlow real PostgreSQL, auth, upload and owner boundary', () => {
       data: { ownerId: other.user.id, mediaAssetId: firstAsset.id, pipelineVersion: 'g1-test' },
     })).rejects.toMatchObject({ code: 'P2003' })
 
+    const [firstTranscriptRun, secondTranscriptRun, conflictingTranscriptRun] = await Promise.all([
+      database.processingRun.create({ data: { ownerId: owner.user.id, mediaAssetId: firstAsset.id, pipelineVersion: 'g3-test-first' } }),
+      database.processingRun.create({ data: { ownerId: owner.user.id, mediaAssetId: secondAsset.id, pipelineVersion: 'g3-test-second' } }),
+      database.processingRun.create({ data: { ownerId: owner.user.id, mediaAssetId: firstAsset.id, pipelineVersion: 'g3-test-conflict' } }),
+    ])
     const firstTranscript = await database.transcriptVersion.create({
-      data: { mediaAssetId: firstAsset.id, version: 1, durationMs: 1_000 },
+      data: {
+        mediaAssetId: firstAsset.id, processingRunId: firstTranscriptRun.id, version: 1, durationMs: 1_000,
+        pipelineVersion: 'g3-test-first', modelVersion: 'fake-moss',
+      },
     })
     const secondTranscript = await database.transcriptVersion.create({
-      data: { mediaAssetId: secondAsset.id, version: 1, durationMs: 1_000 },
+      data: {
+        mediaAssetId: secondAsset.id, processingRunId: secondTranscriptRun.id, version: 1, durationMs: 1_000,
+        pipelineVersion: 'g3-test-second', modelVersion: 'fake-moss',
+      },
     })
     await database.transcriptVersion.update({ where: { id: firstTranscript.id }, data: { status: 'ACTIVE' } })
     await expect(database.transcriptVersion.create({
-      data: { mediaAssetId: firstAsset.id, version: 2, durationMs: 1_000, status: 'ACTIVE' },
+      data: {
+        mediaAssetId: firstAsset.id, processingRunId: conflictingTranscriptRun.id, version: 2, durationMs: 1_000,
+        pipelineVersion: 'g3-test-conflict', modelVersion: 'fake-moss', status: 'ACTIVE',
+      },
     })).rejects.toMatchObject({ code: 'P2002' })
     await expect(database.privateLesson.create({
       data: {
@@ -647,5 +662,148 @@ describe('EchoFlow real PostgreSQL, auth, upload and owner boundary', () => {
       .send({ partNumbers: [2] })
       .expect(410)
     expect(expired.body).toMatchObject({ code: 'upload_expired' })
+  })
+
+  it('authenticates MOSS callbacks over the raw body and persists replay protection before waking the worker', async () => {
+    const owner = await login('+8613800000023')
+    const asset = await database.mediaAsset.create({
+      data: { ownerId: owner.user.id, title: 'Callback podcast', originalName: 'callback.mp4', status: 'PLAYABLE', durationMs: 30_000 },
+    })
+    const run = await database.processingRun.create({
+      data: { ownerId: owner.user.id, mediaAssetId: asset.id, pipelineVersion: 'g3-transcript-v1', stage: 'TRANSCRIBING', status: 'PROCESSING' },
+    })
+    const chunk = await database.processingChunk.create({
+      data: {
+        processingRunId: run.id, chunkIndex: 0, startMs: 0, endMs: 30_000,
+        idempotencyKey: 'g3:' + 'a'.repeat(64), modelVersion: 'fake-moss',
+        externalJobId: 'moss-callback-job-1', inputObjectKey: 'private-redacted.wav', status: 'PROCESSING',
+      },
+    })
+    const body = {
+      externalJobId: chunk.externalJobId,
+      idempotencyKey: chunk.idempotencyKey,
+      status: 'succeeded',
+      occurredAt: new Date().toISOString(),
+    }
+    const timestamp = String(Math.floor(Date.now() / 1000))
+    const nonce = 'callback-nonce-1234'
+    const sendCallback = (
+      eventId: string,
+      callbackNonce = nonce,
+      callbackBody: typeof body = body,
+      callbackSignature?: string,
+    ) => {
+      const raw = JSON.stringify(callbackBody)
+      const signature = callbackSignature ?? `v1=${createHmac('sha256', env.MOSS_CALLBACK_SECRET!)
+        .update(timestamp).update('.').update(callbackNonce).update('.').update(raw).digest('hex')}`
+      return request(app.getHttpServer())
+        .post('/api/v1/integrations/moss/callback')
+        .set('content-type', 'application/json')
+        .set('x-echoflow-event-id', eventId)
+        .set('x-echoflow-timestamp', timestamp)
+        .set('x-echoflow-nonce', callbackNonce)
+        .set('x-echoflow-signature', signature)
+        .send(raw)
+    }
+
+    await sendCallback('callback-event-1234').expect(201, { accepted: true, duplicate: false })
+    await sendCallback('callback-event-1234').expect(201, { accepted: true, duplicate: true })
+    expect(await database.mossCallbackReceipt.count()).toBe(1)
+    expect(await database.outboxEvent.count({ where: { eventType: 'moss.callback_received' } })).toBe(1)
+    expect((await database.processingChunk.findUniqueOrThrow({ where: { id: chunk.id } })).nextPollAt).not.toBeNull()
+
+    const replay = await sendCallback('callback-event-replay').expect(409)
+    expect(replay.body).toMatchObject({ code: 'moss_callback_invalid' })
+    const forged = await sendCallback('callback-event-forged', 'callback-nonce-5678', body, 'v1=' + '0'.repeat(64)).expect(401)
+    expect(forged.body).toMatchObject({ code: 'moss_callback_invalid' })
+
+    const olderFailure = {
+      ...body, status: 'failed', errorCode: 'stale_failure',
+      occurredAt: new Date(new Date(body.occurredAt).getTime() - 10_000).toISOString(),
+    }
+    await sendCallback('callback-event-older', 'callback-nonce-older', olderFailure)
+      .expect(201, { accepted: true, duplicate: false, ignored: true })
+    expect(await database.mossCallbackReceipt.count()).toBe(2)
+    expect(await database.outboxEvent.count({ where: { eventType: 'moss.callback_received' } })).toBe(1)
+    expect(await database.processingChunk.findUniqueOrThrow({ where: { id: chunk.id } })).toMatchObject({ status: 'PROCESSING', errorCode: null })
+  })
+
+  it('exposes only the owner ACTIVE transcript and retries only a persisted retryable failure', async () => {
+    const owner = await login('+8613800000024')
+    const other = await login('+8613800000025')
+    const asset = await database.mediaAsset.create({
+      data: { ownerId: owner.user.id, title: 'Private transcript', originalName: 'private.mp4', status: 'PLAYABLE', durationMs: 30_000 },
+    })
+    const run = await database.processingRun.create({
+      data: {
+        ownerId: owner.user.id, mediaAssetId: asset.id, pipelineVersion: 'g3-transcript-v1',
+        status: 'SUCCEEDED', stage: 'TRANSCRIPT_READY', completedAt: new Date(),
+      },
+    })
+    const transcript = await database.transcriptVersion.create({
+      data: {
+        mediaAssetId: asset.id, processingRunId: run.id, version: 1, status: 'ACTIVE', language: 'en',
+        pipelineVersion: 'g3-transcript-v1', modelVersion: 'fake-moss', durationMs: 30_000,
+        cueCount: 1, publishedAt: new Date(),
+        cues: { create: {
+          order: 0, startMs: 500, endMs: 1_500, text: 'Owner only.',
+          words: [{ text: 'Owner', startMs: 500, endMs: 900 }, { text: 'only.', startMs: 1_000, endMs: 1_500 }],
+        } },
+      },
+    })
+    const owned = await request(app.getHttpServer())
+      .get(`/api/v1/media-assets/${asset.id}/transcript`)
+      .set('authorization', `Bearer ${owner.accessToken}`)
+      .expect(200)
+    expect(owned.body).toMatchObject({ id: transcript.id, cueCount: 1, cues: [{ text: 'Owner only.' }] })
+    await request(app.getHttpServer())
+      .get(`/api/v1/media-assets/${asset.id}/transcript`)
+      .set('authorization', `Bearer ${other.accessToken}`)
+      .expect(404)
+
+    const failedAsset = await database.mediaAsset.create({
+      data: { ownerId: owner.user.id, title: 'Retry transcript', originalName: 'retry.mp4', status: 'PLAYABLE', durationMs: 30_000 },
+    })
+    const failedRun = await database.processingRun.create({
+      data: {
+        ownerId: owner.user.id, mediaAssetId: failedAsset.id, pipelineVersion: 'g3-transcript-v1',
+        status: 'FAILED', stage: 'TRANSCRIBING', errorCode: 'moss_timeout', failedAt: new Date(),
+      },
+    })
+    const failedChunk = await database.processingChunk.create({
+      data: {
+        processingRunId: failedRun.id, chunkIndex: 0, startMs: 0, endMs: 30_000, status: 'FAILED',
+        idempotencyKey: 'g3:' + 'b'.repeat(64), modelVersion: 'fake-moss', inputObjectKey: 'redacted.wav',
+        errorCode: 'moss_timeout', failedAt: new Date(),
+      },
+    })
+    await database.mediaObject.create({ data: {
+      mediaAssetId: failedAsset.id, kind: 'AUDIO_CHUNK', bucket: 'test', objectKey: 'redacted.wav',
+      contentType: 'audio/wav', sizeBytes: 1n, metadata: { processingRunId: failedRun.id, chunkIndex: 0 },
+    } })
+    const retry = () => request(app.getHttpServer())
+      .post(`/api/v1/media-assets/${failedAsset.id}/transcript/retry`)
+      .set('authorization', `Bearer ${owner.accessToken}`)
+      .set('idempotency-key', 'retry-owner-1234')
+    await retry().expect(201, { accepted: true, processingRunId: failedRun.id, duplicate: false })
+    await retry().expect(201, { accepted: true, processingRunId: failedRun.id, duplicate: true })
+    expect(await database.processingRun.findUniqueOrThrow({ where: { id: failedRun.id } })).toMatchObject({ status: 'QUEUED', stage: 'TRANSCRIBING' })
+    expect(await database.processingChunk.findUniqueOrThrow({ where: { id: failedChunk.id } })).toMatchObject({ status: 'QUEUED', errorCode: null })
+    expect(await database.outboxEvent.count({ where: { eventType: 'media.transcript_retry_requested' } })).toBe(1)
+    await request(app.getHttpServer())
+      .post(`/api/v1/media-assets/${failedAsset.id}/transcript/retry`)
+      .set('authorization', `Bearer ${other.accessToken}`)
+      .set('idempotency-key', 'retry-other-1234')
+      .expect(404)
+
+    const cancel = () => request(app.getHttpServer())
+      .post(`/api/v1/media-assets/${failedAsset.id}/transcript/cancel`)
+      .set('authorization', `Bearer ${owner.accessToken}`)
+      .set('idempotency-key', 'cancel-owner-1234')
+    await cancel().expect(201, { cancelled: true, processingRunId: failedRun.id, duplicate: false })
+    await cancel().expect(201, { cancelled: true, processingRunId: failedRun.id, duplicate: true })
+    expect(await database.processingRun.findUniqueOrThrow({ where: { id: failedRun.id } })).toMatchObject({ status: 'CANCELLED', errorCode: 'processing_cancelled' })
+    expect(await database.processingChunk.findUniqueOrThrow({ where: { id: failedChunk.id } })).toMatchObject({ status: 'CANCELLED', errorCode: 'processing_cancelled' })
+    expect(await database.outboxEvent.count({ where: { eventType: 'media.transcript_cancel_requested' } })).toBe(1)
   })
 })

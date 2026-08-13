@@ -6,12 +6,13 @@ describe('V1 Prisma baseline', () => {
   const schema = readFileSync(resolve(__dirname, '../prisma/schema.prisma'), 'utf8')
   const migration = readFileSync(resolve(__dirname, '../prisma/migrations/20260812000100_v1_baseline/migration.sql'), 'utf8')
   const g2Migration = readFileSync(resolve(__dirname, '../prisma/migrations/20260812000200_g2_upload_metadata/migration.sql'), 'utf8')
+  const g3Migration = readFileSync(resolve(__dirname, '../prisma/migrations/20260813000100_g3_moss_transcript/migration.sql'), 'utf8')
 
   it('contains every V1 core model', () => {
     for (const model of [
       'User', 'OtpChallenge', 'RefreshSession', 'UploadSession', 'UploadPart', 'MediaAsset', 'MediaObject',
       'ProcessingRun', 'ProcessingChunk', 'OutboxEvent', 'TranscriptVersion', 'SubtitleCue', 'PrivateLesson',
-      'LearningUnit', 'LearningProgress', 'AuditEvent', 'IdempotencyRecord',
+      'LearningUnit', 'LearningProgress', 'AuditEvent', 'IdempotencyRecord', 'MossCallbackReceipt',
     ]) expect(schema).toContain(`model ${model} `)
   })
 
@@ -62,5 +63,19 @@ describe('V1 Prisma baseline', () => {
     expect(g2Migration).toContain('UploadSession_ownerId_fileFingerprint_idx')
     expect(g2Migration).toContain('UploadSession_fingerprint_check')
     expect(g2Migration).toContain('ADD COLUMN "etag"')
+  })
+
+  it('adds durable G3 MOSS identity, replay protection and transcript provenance', () => {
+    expect(schema).toContain('idempotencyKey  String')
+    expect(schema).toContain('externalJobId   String?          @unique')
+    expect(schema).toContain('model MossCallbackReceipt')
+    expect(schema).toContain('processingRunId String         @unique')
+    expect(schema).toContain('purgedAt       DateTime?')
+    expect(g3Migration).toContain('ProcessingRun_mediaAssetId_pipelineVersion_key')
+    expect(g3Migration).toContain('ProcessingRun_id_mediaAssetId_key')
+    expect(g3Migration).toContain('ProcessingChunk_externalJobId_key')
+    expect(g3Migration).toContain('MossCallbackReceipt_nonce_key')
+    expect(g3Migration).toContain('G3 migration requires an empty pre-G3 TranscriptVersion table')
+    expect(g3Migration).toContain('FOREIGN KEY ("processingRunId", "mediaAssetId")')
   })
 })

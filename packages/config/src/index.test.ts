@@ -36,4 +36,33 @@ describe('server environment safety', () => {
   it('rejects an allowlist containing no valid origin', () => {
     expect(() => loadServerEnv({ ...valid, CORS_ALLOWED_ORIGINS: ' ,  ' })).toThrow()
   })
+
+  it('keeps MOSS disabled without inventing credentials', () => {
+    const env = loadServerEnv(valid)
+    expect(env.MOSS_ENABLED).toBe(false)
+    expect(env.MOSS_BASE_URL).toBeUndefined()
+  })
+
+  it('requires the complete MOSS trust boundary when enabled', () => {
+    expect(() => loadServerEnv({ ...valid, MOSS_ENABLED: 'true' })).toThrow()
+    expect(loadServerEnv({
+      ...valid,
+      MOSS_ENABLED: 'true',
+      MOSS_BASE_URL: 'https://moss.example',
+      MOSS_API_TOKEN: 'moss-production-token-123456',
+      MOSS_CALLBACK_SECRET: 'moss-callback-secret-at-least-32-characters',
+      MOSS_CALLBACK_PUBLIC_URL: 'https://api.echoflow.example/api/v1/integrations/moss/callback',
+    }).MOSS_ENABLED).toBe(true)
+  })
+
+  it('rejects plaintext production MOSS endpoints', () => {
+    expect(() => loadServerEnv({
+      ...valid,
+      MOSS_ENABLED: 'true',
+      MOSS_BASE_URL: 'http://moss.example',
+      MOSS_API_TOKEN: 'moss-production-token-123456',
+      MOSS_CALLBACK_SECRET: 'moss-callback-secret-at-least-32-characters',
+      MOSS_CALLBACK_PUBLIC_URL: 'http://api.echoflow.example/api/v1/integrations/moss/callback',
+    })).toThrow()
+  })
 })

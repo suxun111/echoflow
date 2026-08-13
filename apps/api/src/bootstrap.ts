@@ -12,6 +12,7 @@ type ApplicationOptions = {
 export async function createApplication(env: ServerEnv, options: ApplicationOptions = {}): Promise<INestApplication> {
   const app = await NestFactory.create(AppModule.register(env), {
     abortOnError: false,
+    rawBody: true,
     logger: env.NODE_ENV === 'test' ? false : ['error', 'warn', 'log'],
   })
   app.setGlobalPrefix('api/v1')

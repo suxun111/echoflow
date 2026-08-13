@@ -29,5 +29,10 @@ export function createTestEnv() {
     UPLOAD_PART_SIZE_BYTES: String(5 * 1024 * 1024),
     UPLOAD_SESSION_TTL_SECONDS: String(7 * 24 * 3600),
     STORAGE_SIGNED_URL_TTL_SECONDS: '900',
+    MOSS_ENABLED: 'true',
+    MOSS_BASE_URL: 'https://moss.test',
+    MOSS_API_TOKEN: 'test-moss-api-token-long-enough',
+    MOSS_CALLBACK_SECRET: 'test-moss-callback-secret-at-least-32-characters',
+    MOSS_CALLBACK_PUBLIC_URL: 'https://api.test/api/v1/integrations/moss/callback',
   })
 }

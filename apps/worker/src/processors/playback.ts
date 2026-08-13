@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { Prisma, type PrismaClient } from '@online-learning/database'
 import type { MultipartStorageProvider } from '@online-learning/storage'
+import { G3_PIPELINE_VERSION } from '../transcript/constants'
 
 const execFileAsync = promisify(execFile)
 
@@ -145,6 +146,7 @@ type PlaybackProcessorOptions = {
   ffmpegPath?: string
   probe?: (ffprobePath: string, mediaSource: string) => Promise<ProbeResult>
   now?: () => Date
+  transcriptEnabled?: boolean
 }
 
 export function createPlaybackProcessor(options: PlaybackProcessorOptions) {
@@ -244,13 +246,23 @@ export function createPlaybackProcessor(options: PlaybackProcessorOptions) {
             },
           })
         }
-        await transaction.outboxEvent.create({
-          data: {
-            aggregateType: 'MediaAsset', aggregateId: asset.id, eventType: 'media.playback_ready',
-            idempotencyKey: `media:${asset.id}:playback_ready:g2-playback-v1`,
-            payload: { mediaAssetId: asset.id, processingRunId: job.processingRunId },
-          },
-        })
+        if (options.transcriptEnabled ?? true) {
+          const transcriptRun = await transaction.processingRun.upsert({
+            where: { mediaAssetId_pipelineVersion: { mediaAssetId: asset.id, pipelineVersion: G3_PIPELINE_VERSION } },
+            create: {
+              ownerId: asset.ownerId, mediaAssetId: asset.id,
+              pipelineVersion: G3_PIPELINE_VERSION, stage: 'PLAYBACK_READY',
+            },
+            update: {},
+          })
+          await transaction.outboxEvent.create({
+            data: {
+              aggregateType: 'MediaAsset', aggregateId: asset.id, eventType: 'media.playback_ready',
+              idempotencyKey: `media:${asset.id}:playback_ready:${G3_PIPELINE_VERSION}`,
+              payload: { mediaAssetId: asset.id, processingRunId: transcriptRun.id },
+            },
+          })
+        }
       })
       return { skipped: false, failed: false, ...result }
     } catch (error) {

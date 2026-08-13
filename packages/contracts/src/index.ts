@@ -54,6 +54,20 @@ export const ApiErrorCodeSchema = z.enum([
   'media_format_unsupported',
   'media_not_playable',
   'storage_unavailable',
+  'transcript_not_ready',
+  'transcript_active_conflict',
+  'audio_extract_failed',
+  'audio_chunk_failed',
+  'moss_unavailable',
+  'moss_timeout',
+  'moss_rate_limited',
+  'moss_rejected',
+  'moss_invalid_response',
+  'moss_callback_invalid',
+  'transcript_incomplete',
+  'transcript_timing_invalid',
+  'transcript_publish_failed',
+  'processing_cancelled',
 ])
 export const ApiErrorSchema = z.object({
   code: ApiErrorCodeSchema,
@@ -122,6 +136,15 @@ export const SignedUploadPartSchema = z.object({
 
 export const SignedUploadPartsResponseSchema = z.object({ parts: z.array(SignedUploadPartSchema) }).strict()
 
+export const TranscriptProcessingViewSchema = z.object({
+  status: ProcessingStatusSchema.nullable(),
+  stage: ProcessingStageSchema.nullable(),
+  completedChunks: z.number().int().nonnegative(),
+  totalChunks: z.number().int().nonnegative(),
+  errorCode: z.string().nullable(),
+  updatedAt: z.string().datetime().nullable(),
+}).strict()
+
 export const MediaAssetViewSchema = z.object({
   id: IdSchema,
   uploadSessionId: IdSchema.nullable(),
@@ -131,6 +154,7 @@ export const MediaAssetViewSchema = z.object({
   durationMs: z.number().int().positive().nullable(),
   processingStage: ProcessingStageSchema.nullable(),
   errorCode: z.string().nullable(),
+  transcriptProcessing: TranscriptProcessingViewSchema.optional(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 }).strict()
@@ -139,6 +163,43 @@ export const PlaybackUrlSchema = z.object({
   mediaAssetId: IdSchema,
   playbackUrl: z.string().url(),
   expiresAt: z.string().datetime(),
+}).strict()
+
+export const TranscriptWordSchema = z.object({
+  text: z.string().trim().min(1),
+  startMs: z.number().int().nonnegative(),
+  endMs: z.number().int().positive(),
+}).strict().refine((word) => word.endMs > word.startMs, '单词结束时间必须晚于开始时间')
+
+export const TranscriptCueViewSchema = z.object({
+  id: IdSchema,
+  order: z.number().int().nonnegative(),
+  startMs: z.number().int().nonnegative(),
+  endMs: z.number().int().positive(),
+  text: z.string().trim().min(1),
+  words: z.array(TranscriptWordSchema).min(1),
+}).strict()
+
+export const ActiveTranscriptViewSchema = z.object({
+  id: IdSchema,
+  mediaAssetId: IdSchema,
+  version: z.number().int().positive(),
+  language: z.literal('en'),
+  durationMs: z.number().int().positive(),
+  cueCount: z.number().int().nonnegative(),
+  pipelineVersion: z.string().min(1),
+  modelVersion: z.string().min(1),
+  publishedAt: z.string().datetime(),
+  cues: z.array(TranscriptCueViewSchema),
+}).strict()
+
+export const MossCallbackStatusSchema = z.enum(['queued', 'processing', 'succeeded', 'failed', 'cancelled'])
+export const MossCallbackSchema = z.object({
+  externalJobId: z.string().min(1).max(512),
+  idempotencyKey: z.string().min(1).max(512),
+  status: MossCallbackStatusSchema,
+  occurredAt: z.string().datetime(),
+  errorCode: z.string().min(1).max(128).optional(),
 }).strict()
 
 // Legacy prototype contracts remain temporarily so Web/Worker continue to compile.
@@ -189,6 +250,11 @@ export type SignUploadParts = z.infer<typeof SignUploadPartsSchema>
 export type UploadSessionView = z.infer<typeof UploadSessionViewSchema>
 export type MediaAssetView = z.infer<typeof MediaAssetViewSchema>
 export type PlaybackUrl = z.infer<typeof PlaybackUrlSchema>
+export type TranscriptWord = z.infer<typeof TranscriptWordSchema>
+export type TranscriptCueView = z.infer<typeof TranscriptCueViewSchema>
+export type ActiveTranscriptView = z.infer<typeof ActiveTranscriptViewSchema>
+export type TranscriptProcessingView = z.infer<typeof TranscriptProcessingViewSchema>
+export type MossCallback = z.infer<typeof MossCallbackSchema>
 export type SubtitleCue = z.infer<typeof SubtitleCueSchema>
 export type VideoSummary = z.infer<typeof VideoSummarySchema>
 export type LessonDetail = z.infer<typeof LessonDetailSchema>

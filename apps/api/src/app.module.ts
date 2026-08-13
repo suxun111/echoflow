@@ -9,6 +9,7 @@ import { AuthModule } from './modules/auth/auth.module'
 import { HealthModule } from './modules/health/health.module'
 import { LessonsModule } from './modules/lessons/lessons.module'
 import { MediaAssetsModule } from './modules/media-assets/media-assets.module'
+import { MossCallbackModule } from './modules/moss-callback/moss-callback.module'
 import { UploadsModule } from './modules/uploads/uploads.module'
 import { UsersModule } from './modules/users/users.module'
 import { StorageModule } from './storage/storage.module'
@@ -20,7 +21,7 @@ export class AppModule {
       module: AppModule,
       imports: [
         AppConfigModule.forRoot(env), DatabaseModule, StorageModule, HealthModule, AuthModule,
-        UsersModule, LessonsModule, UploadsModule, MediaAssetsModule, AdminModule,
+        UsersModule, LessonsModule, UploadsModule, MediaAssetsModule, MossCallbackModule, AdminModule,
       ],
       providers: [{ provide: APP_GUARD, useClass: AuthGuard }],
     }

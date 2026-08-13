@@ -31,7 +31,13 @@ function statusCopy(upload: UploadSessionView, asset?: MediaAssetView) {
   if (upload.status === 'cancelled') return ['已取消', '原始分片已撤销']
   if (upload.status === 'expired') return ['已过期', '7 天续传窗口已经结束']
   if (upload.status === 'failed' || asset?.status === 'failed') return ['不支持播放', asset?.errorCode === 'media_format_unsupported' ? '请重新上传 MP4 / H.264 / AAC 文件' : '对象或媒体检查失败，请重新上传原文件']
-  if (asset?.status === 'playable') return ['可以播放', '原始清晰度视频已经准备好']
+  if (asset?.status === 'playable' && asset.transcriptProcessing?.status === 'succeeded') return ['字幕已完成', '完整英文逐词字幕已经准备好']
+  if (asset?.status === 'playable' && asset.transcriptProcessing?.status === 'failed') return ['字幕失败，原片可播', asset.transcriptProcessing.errorCode ?? '字幕任务失败，请在“我的视频”中重试']
+  if (asset?.status === 'playable' && ['queued', 'processing', 'validating'].includes(asset.transcriptProcessing?.status ?? '')) {
+    const state = asset.transcriptProcessing!
+    return ['正在生成字幕', state.totalChunks ? `已完成 ${state.completedChunks}/${state.totalChunks} 个分片` : '正在提取并切分英文音频']
+  }
+  if (asset?.status === 'playable') return ['可以播放', '原始清晰度视频已经准备好，等待字幕任务']
   if (upload.status === 'completed') return ['检查播放', '正在确认容器、编码和真实时长']
   if (upload.status === 'verifying') return ['核对文件', '正在读取对象存储的真实分片清单']
   if (upload.status === 'uploading') return ['上传中', '可以暂停，并在 7 天内继续']
@@ -80,7 +86,8 @@ export function UploadsPage({ api }: { api: ApiClient }) {
 
   useEffect(() => { void loadData() }, [loadData])
   useEffect(() => {
-    if (!assets.some((asset) => asset.status === 'processing_playback')) return
+    if (!assets.some((asset) => asset.status === 'processing_playback'
+      || ['queued', 'processing', 'validating'].includes(asset.transcriptProcessing?.status ?? ''))) return
     const timer = window.setInterval(() => void loadData(), 2_500)
     return () => window.clearInterval(timer)
   }, [assets, loadData])
