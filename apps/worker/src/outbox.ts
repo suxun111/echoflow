@@ -135,8 +135,14 @@ export async function enqueueRecoverableTranscriptRuns(database: PrismaClient, q
 export async function enqueuePendingTranscriptCancellations(database: PrismaClient, queue: QueueWriter) {
   const runs = await database.processingRun.findMany({
     where: {
-      pipelineVersion: G3_PIPELINE_VERSION, status: 'CANCELLED',
-      chunks: { some: { externalCancelledAt: null } },
+      pipelineVersion: G3_PIPELINE_VERSION,
+      OR: [
+        { status: 'CANCELLED', chunks: { some: { externalCancelledAt: null } } },
+        {
+          status: 'FAILED',
+          chunks: { some: { status: 'FAILED', errorCode: 'moss_timeout', externalCancelledAt: null } },
+        },
+      ],
     },
     select: { id: true, mediaAssetId: true }, take: 100,
   })

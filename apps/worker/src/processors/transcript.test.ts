@@ -1,4 +1,5 @@
-import { execFile } from 'node:child_process'
+import { execFile, spawn, type ChildProcess } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -6,10 +7,12 @@ import { promisify } from 'node:util'
 import type { ServerEnv } from '@online-learning/config'
 import { PrismaClient } from '@online-learning/database'
 import { MinioStorageProvider, type MultipartStorageProvider } from '@online-learning/storage'
+import { Queue } from 'bullmq'
+import IORedis from 'ioredis'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { MossAdapter } from '../moss/adapter'
 import { FakeMossAdapter } from '../moss/fake-adapter'
-import { enqueueRecoverableTranscriptRuns } from '../outbox'
+import { enqueuePendingTranscriptCancellations, enqueueRecoverableTranscriptRuns } from '../outbox'
 import { G3_PIPELINE_VERSION } from '../transcript/constants'
 import { cancelExternalTranscriptJobs, createTranscriptProcessor } from './transcript'
 import { cleanupTranscriptObjects } from './transcript-cleanup'
@@ -30,6 +33,7 @@ const env = {
   MOSS_AUDIO_URL_TTL_SECONDS: 900,
   MOSS_CALLBACK_PUBLIC_URL: 'https://api.example/api/v1/integrations/moss/callback',
   MOSS_POLL_INTERVAL_SECONDS: 5,
+  MOSS_JOB_TIMEOUT_SECONDS: 6 * 60 * 60,
   MOSS_MAX_ATTEMPTS: 3,
 } as ServerEnv
 let directory = ''
@@ -257,7 +261,8 @@ describe('G3 real media pipeline with deterministic Fake MOSS', () => {
     }
     const processTranscript = createTranscriptProcessor({ database, storage, moss: racingMoss, env, workerId: 'g3-worker-submit-race' })
 
-    await expect(processTranscript({ mediaAssetId: asset.id, processingRunId: run.id })).resolves.toMatchObject({ waiting: true })
+    await expect(processTranscript({ mediaAssetId: asset.id, processingRunId: run.id }))
+      .resolves.toMatchObject({ skipped: true, leaseLost: true })
     const chunk = await database.processingChunk.findFirstOrThrow({ where: { processingRunId: run.id } })
     expect(chunk).toMatchObject({ status: 'CANCELLED' })
     expect(chunk.externalJobId).toBeTruthy()
@@ -293,6 +298,78 @@ describe('G3 real media pipeline with deterministic Fake MOSS', () => {
     expect(recovered).toMatchObject({ externalJobId })
     expect(recovered.externalCancelledAt).not.toBeNull()
     await expect(moss.query(externalJobId)).resolves.toMatchObject({ status: 'cancelled' })
+  }, 120_000)
+
+  it('keeps a negative cancellation lookup recoverable until the provider can expose the accepted job', async () => {
+    const { asset, run } = await createRun(shortPath, 30_000, '15')
+    const moss = new FakeMossAdapter()
+    const processTranscript = createTranscriptProcessor({ database, storage, moss, env, workerId: 'g3-worker-cancel-negative' })
+    await processTranscript({ mediaAssetId: asset.id, processingRunId: run.id })
+    const chunk = await database.processingChunk.findFirstOrThrow({ where: { processingRunId: run.id } })
+    await database.$transaction([
+      database.processingRun.update({
+        where: { id: run.id }, data: { status: 'CANCELLED', errorCode: 'processing_cancelled', leaseOwner: null, leaseExpiresAt: null },
+      }),
+      database.processingChunk.update({
+        where: { id: chunk.id },
+        data: { status: 'CANCELLED', errorCode: 'processing_cancelled', externalJobId: null, externalCancelledAt: null },
+      }),
+    ])
+    const originalExternalJobId = chunk.externalJobId!
+    // A provider read replica can briefly return "not found" after accepting the submit.
+    const lookupLagMoss: MossAdapter = {
+      findByIdempotencyKey: async () => null,
+      submit: (input) => moss.submit(input), query: (id) => moss.query(id),
+      result: (id) => moss.result(id), cancel: (id) => moss.cancel(id),
+    }
+    await expect(cancelExternalTranscriptJobs(database, lookupLagMoss, {
+      mediaAssetId: asset.id, processingRunId: run.id,
+    })).resolves.toEqual({ skipped: false, cancelled: 0 })
+    expect((await database.processingChunk.findUniqueOrThrow({ where: { id: chunk.id } })).externalCancelledAt).toBeNull()
+
+    await expect(cancelExternalTranscriptJobs(database, moss, {
+      mediaAssetId: asset.id, processingRunId: run.id,
+    })).resolves.toMatchObject({ cancelled: 1 })
+    expect(await database.processingChunk.findUniqueOrThrow({ where: { id: chunk.id } }))
+      .toMatchObject({ externalJobId: originalExternalJobId })
+    await expect(moss.query(originalExternalJobId)).resolves.toMatchObject({ status: 'cancelled' })
+  }, 120_000)
+
+  it('does not falsely confirm a timeout cancellation when the provider cancel call fails', async () => {
+    const { asset, run } = await createRun(shortPath, 30_000, '16')
+    const moss = new FakeMossAdapter()
+    const processTranscript = createTranscriptProcessor({ database, storage, moss, env, workerId: 'g3-worker-timeout-cancel' })
+    await processTranscript({ mediaAssetId: asset.id, processingRunId: run.id })
+    const chunk = await database.processingChunk.findFirstOrThrow({ where: { processingRunId: run.id } })
+    await database.$transaction([
+      database.processingRun.update({
+        where: { id: run.id }, data: { status: 'FAILED', errorCode: 'moss_timeout', leaseOwner: null, leaseExpiresAt: null },
+      }),
+      database.processingChunk.update({
+        where: { id: chunk.id },
+        data: { status: 'FAILED', errorCode: 'moss_timeout', externalCancelledAt: null, leaseOwner: null, leaseExpiresAt: null },
+      }),
+    ])
+    let failCancel = true
+    const flakyCancelMoss: MossAdapter = {
+      findByIdempotencyKey: (key) => moss.findByIdempotencyKey(key),
+      submit: (input) => moss.submit(input), query: (id) => moss.query(id), result: (id) => moss.result(id),
+      cancel: async (id) => {
+        if (failCancel) throw new Error('simulated_cancel_timeout')
+        await moss.cancel(id)
+      },
+    }
+    await expect(cancelExternalTranscriptJobs(database, flakyCancelMoss, {
+      mediaAssetId: asset.id, processingRunId: run.id,
+    })).rejects.toThrow('simulated_cancel_timeout')
+    expect((await database.processingChunk.findUniqueOrThrow({ where: { id: chunk.id } })).externalCancelledAt).toBeNull()
+    const add = vi.fn(async () => undefined)
+    await expect(enqueuePendingTranscriptCancellations(database, { add } as never)).resolves.toEqual({ enqueued: 1 })
+    failCancel = false
+    await expect(cancelExternalTranscriptJobs(database, flakyCancelMoss, {
+      mediaAssetId: asset.id, processingRunId: run.id,
+    })).resolves.toMatchObject({ cancelled: 1 })
+    expect((await database.processingChunk.findUniqueOrThrow({ where: { id: chunk.id } })).externalCancelledAt).not.toBeNull()
   }, 120_000)
 
   it('keeps cancellation terminal when a successful MOSS result arrives concurrently', async () => {
@@ -377,6 +454,86 @@ describe('G3 real media pipeline with deterministic Fake MOSS', () => {
     expect(transcript.modelVersion).toBe(env.MOSS_MODEL_VERSION)
   }, 120_000)
 
+  it('prevents a stale publisher from committing after a replacement takes over the run lease', async () => {
+    const { asset, run } = await createRun(shortPath, 30_000, '20')
+    const moss = new FakeMossAdapter()
+    const seed = createTranscriptProcessor({ database, storage, moss, env, workerId: 'g3-publish-seed' })
+    await seed({ mediaAssetId: asset.id, processingRunId: run.id })
+    const chunk = await database.processingChunk.findFirstOrThrow({ where: { processingRunId: run.id } })
+    moss.succeed(chunk.externalJobId!, { language: 'en', words: [
+      { text: 'Publish', startMs: 500, endMs: 1_000 }, { text: 'once.', startMs: 1_100, endMs: 1_600 },
+    ] })
+    await database.processingChunk.update({ where: { id: chunk.id }, data: { nextPollAt: new Date(0) } })
+    let releaseMergeRead!: () => void
+    let signalMergeRead!: () => void
+    const mergeReadGate = new Promise<void>((resolve) => { releaseMergeRead = resolve })
+    const mergeReadStarted = new Promise<void>((resolve) => { signalMergeRead = resolve })
+    const pausedStorage = wrapStorage({
+      downloadFile: async (objectKey, filePath, versionId) => {
+        await storage.downloadFile(objectKey, filePath, versionId)
+        if (objectKey.includes('/asr/')) {
+          signalMergeRead()
+          await mergeReadGate
+        }
+      },
+    })
+    const stale = createTranscriptProcessor({ database, storage: pausedStorage, moss, env, workerId: 'g3-publisher-stale' })
+    const stalePublishing = stale({ mediaAssetId: asset.id, processingRunId: run.id })
+    await mergeReadStarted
+    await database.processingRun.update({ where: { id: run.id }, data: { leaseExpiresAt: new Date(0) } })
+    const replacement = createTranscriptProcessor({ database, storage, moss, env, workerId: 'g3-publisher-replacement' })
+    await expect(replacement({ mediaAssetId: asset.id, processingRunId: run.id })).resolves.toMatchObject({ completed: true })
+    releaseMergeRead()
+    await expect(stalePublishing).resolves.toMatchObject({ skipped: true, leaseLost: true })
+    expect(await database.transcriptVersion.count({ where: { mediaAssetId: asset.id, status: 'ACTIVE' } })).toBe(1)
+    expect(await database.processingRun.findUniqueOrThrow({ where: { id: run.id } }))
+      .toMatchObject({ status: 'SUCCEEDED', stage: 'TRANSCRIPT_READY' })
+  }, 120_000)
+
+  it.each(['CUE_SEGMENTING', 'VALIDATING'] as const)(
+    'resumes atomic publication from the persisted %s stage after a worker exit',
+    async (stage) => {
+      const suffix = stage === 'CUE_SEGMENTING' ? '21' : '22'
+      const { asset, run } = await createRun(shortPath, 30_000, suffix)
+      const moss = new FakeMossAdapter()
+      const seed = createTranscriptProcessor({ database, storage, moss, env, workerId: `g3-stage-seed-${stage}` })
+      await seed({ mediaAssetId: asset.id, processingRunId: run.id })
+      const chunk = await database.processingChunk.findFirstOrThrow({ where: { processingRunId: run.id } })
+      const result = { language: 'en' as const, words: [
+        { text: 'Resume', startMs: 500, endMs: 1_000 }, { text: 'safely.', startMs: 1_100, endMs: 1_700 },
+      ] }
+      const bytes = Buffer.from(JSON.stringify(result))
+      const resultChecksum = createHash('sha256').update(bytes).digest('hex')
+      const temporary = join(directory, `resume-${stage}.json`)
+      await writeFile(temporary, bytes)
+      const object = await storage.uploadFile(
+        `owners/${asset.ownerId}/asr/${asset.id}/${run.id}/resume-${stage}.json`, temporary, 'application/json',
+      )
+      await database.$transaction([
+        database.mediaObject.create({ data: {
+          mediaAssetId: asset.id, kind: 'ASR_RAW', bucket: object.bucket, objectKey: object.objectKey,
+          versionId: object.versionId, contentType: 'application/json', sizeBytes: BigInt(object.sizeBytes),
+          checksumSha256: resultChecksum, etag: object.etag,
+          metadata: { processingRunId: run.id, chunkIndex: chunk.chunkIndex, uploadState: 'READY' },
+        } }),
+        database.processingChunk.update({
+          where: { id: chunk.id }, data: {
+            status: 'SUCCEEDED', resultObjectKey: object.objectKey, resultVersionId: object.versionId,
+            resultChecksum, wordCount: result.words.length, completedAt: new Date(), nextPollAt: null,
+            leaseOwner: null, leaseExpiresAt: null,
+          },
+        }),
+        database.processingRun.update({
+          where: { id: run.id }, data: { status: 'QUEUED', stage, leaseOwner: null, leaseExpiresAt: null },
+        }),
+      ])
+      const replacement = createTranscriptProcessor({ database, storage, moss, env, workerId: `g3-stage-replacement-${stage}` })
+      await expect(replacement({ mediaAssetId: asset.id, processingRunId: run.id })).resolves.toMatchObject({ completed: true })
+      expect(await database.transcriptVersion.count({ where: { mediaAssetId: asset.id, status: 'ACTIVE' } })).toBe(1)
+    },
+    120_000,
+  )
+
   it('resumes a database-reserved object after upload response loss without creating a second identity', async () => {
     const { asset, run } = await createRun(shortPath, 30_000, '7')
     const moss = new FakeMossAdapter()
@@ -410,6 +567,121 @@ describe('G3 real media pipeline with deterministic Fake MOSS', () => {
     expect((finalized[0].metadata as { uploadState?: string }).uploadState).toBe('READY')
     expect(normalizedUploads).toBe(1)
   }, 120_000)
+
+  it('serializes overlapping uploads and prevents a stale worker from orphaning the replacement object', async () => {
+    const { asset, run } = await createRun(shortPath, 30_000, '17')
+    const moss = new FakeMossAdapter()
+    let releaseOldUpload!: () => void
+    let signalOldUpload!: () => void
+    const oldUploadGate = new Promise<void>((resolve) => { releaseOldUpload = resolve })
+    const oldUploadStarted = new Promise<void>((resolve) => { signalOldUpload = resolve })
+    const staleStorage = wrapStorage({
+      uploadFile: async (objectKey, filePath, contentType) => {
+        const uploaded = await storage.uploadFile(objectKey, filePath, contentType)
+        if (objectKey.endsWith('/normalized.wav')) {
+          signalOldUpload()
+          await oldUploadGate
+        }
+        return uploaded
+      },
+    })
+    const stale = createTranscriptProcessor({ database, storage: staleStorage, moss, env, workerId: 'g3-object-stale' })
+    const staleProcessing = stale({ mediaAssetId: asset.id, processingRunId: run.id })
+    await oldUploadStarted
+    await database.processingRun.update({ where: { id: run.id }, data: { leaseExpiresAt: new Date(0) } })
+    const replacement = createTranscriptProcessor({ database, storage, moss, env, workerId: 'g3-object-replacement' })
+    const replacementProcessing = replacement({ mediaAssetId: asset.id, processingRunId: run.id })
+    const deadline = Date.now() + 10_000
+    while (Date.now() < deadline) {
+      const current = await database.processingRun.findUniqueOrThrow({ where: { id: run.id } })
+      if (current.leaseOwner === 'g3-object-replacement') break
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+    expect((await database.processingRun.findUniqueOrThrow({ where: { id: run.id } })).leaseOwner).toBe('g3-object-replacement')
+    releaseOldUpload()
+    await expect(staleProcessing).resolves.toMatchObject({ skipped: true, leaseLost: true })
+    await expect(replacementProcessing).resolves.toMatchObject({ waiting: true })
+    const normalized = await database.mediaObject.findMany({ where: { mediaAssetId: asset.id, kind: 'NORMALIZED_AUDIO' } })
+    expect(normalized).toHaveLength(1)
+    expect((normalized[0].metadata as { uploadState?: string }).uploadState).toBe('READY')
+    await expect(storage.statObject(normalized[0].objectKey, normalized[0].versionId)).resolves.toMatchObject({ objectKey: normalized[0].objectKey })
+  }, 120_000)
+
+  it.each(['before-upload', 'after-upload'] as const)(
+    'recovers a durable object identity after an actual worker process is killed %s',
+    async (crashPoint) => {
+      const suffix = crashPoint === 'before-upload' ? '18' : '19'
+      const { asset, run } = await createRun(shortPath, 30_000, suffix)
+      const workerRoot = join(__dirname, '..', '..')
+      const fixture = join('src', 'test-fixtures', 'transcript-crash-worker-child.ts')
+      const tsxCli = require.resolve('tsx/cli')
+      const child = spawn(process.execPath, [tsxCli, fixture], {
+        cwd: workerRoot, windowsHide: true,
+        env: {
+          ...process.env,
+          DATABASE_URL: 'postgresql://online_learning:online_learning@localhost:5432/echoflow_g2_worker_test',
+          MINIO_ENDPOINT: 'localhost', MINIO_PORT: '9000',
+          MINIO_ACCESS_KEY: 'online_learning', MINIO_SECRET_KEY: 'online_learning_secret',
+          MINIO_BUCKET: 'echoflow-g3-worker-test', FFMPEG_PATH: 'ffmpeg',
+          G3_TEST_MEDIA_ASSET_ID: asset.id, G3_TEST_PROCESSING_RUN_ID: run.id,
+          G3_TEST_CRASH_POINT: crashPoint,
+        },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      })
+      const stopChild = async (target: ChildProcess) => {
+        if (target.exitCode !== null || target.signalCode !== null) return
+        const exited = new Promise<void>((resolve) => target.once('exit', () => resolve()))
+        if (process.platform === 'win32' && target.pid) {
+          await execFileAsync('taskkill', ['/PID', String(target.pid), '/T', '/F'], { windowsHide: true }).catch(() => undefined)
+        } else target.kill('SIGKILL')
+        await Promise.race([exited, new Promise((_, reject) => setTimeout(() => reject(new Error('g3_child_kill_timeout')), 5_000))])
+      }
+      try {
+        await new Promise<void>((resolve, reject) => {
+          let output = ''
+          const timeout = setTimeout(() => reject(new Error('g3_crash_point_timeout')), 30_000)
+          child.stdout?.on('data', (chunk: Buffer) => {
+            output += chunk.toString('utf8')
+            if (output.includes('g3_crash_point_reached')) {
+              clearTimeout(timeout)
+              resolve()
+            }
+          })
+          child.once('exit', (code) => {
+            if (!output.includes('g3_crash_point_reached')) {
+              clearTimeout(timeout)
+              reject(new Error(`g3_crash_child_exited_${String(code)}`))
+            }
+          })
+        })
+        await stopChild(child)
+        const pending = await database.mediaObject.findFirstOrThrow({
+          where: { mediaAssetId: asset.id, kind: 'NORMALIZED_AUDIO' },
+        })
+        expect(pending.versionId).toBeNull()
+        expect((pending.metadata as { uploadState?: string }).uploadState).toBe('PENDING')
+        await database.processingRun.update({ where: { id: run.id }, data: { leaseExpiresAt: new Date(0) } })
+        let normalizedUploads = 0
+        const observedStorage = wrapStorage({
+          uploadFile: async (objectKey, filePath, contentType) => {
+            if (objectKey.endsWith('/normalized.wav')) normalizedUploads += 1
+            return storage.uploadFile(objectKey, filePath, contentType)
+          },
+        })
+        const replacement = createTranscriptProcessor({
+          database, storage: observedStorage, moss: new FakeMossAdapter(), env, workerId: `g3-crash-replacement-${crashPoint}`,
+        })
+        await expect(replacement({ mediaAssetId: asset.id, processingRunId: run.id })).resolves.toMatchObject({ waiting: true })
+        expect(normalizedUploads).toBe(crashPoint === 'before-upload' ? 1 : 0)
+        const recovered = await database.mediaObject.findMany({ where: { mediaAssetId: asset.id, kind: 'NORMALIZED_AUDIO' } })
+        expect(recovered).toHaveLength(1)
+        expect((recovered[0].metadata as { uploadState?: string }).uploadState).toBe('READY')
+      } finally {
+        await stopChild(child)
+      }
+    },
+    120_000,
+  )
 
   it('rejects a corrupted immutable ASR object without publishing any transcript', async () => {
     const { asset, run } = await createRun(shortPath, 30_000, '10')
@@ -494,15 +766,24 @@ describe('G3 real media pipeline with deterministic Fake MOSS', () => {
     expect(await database.transcriptVersion.count({ where: { mediaAssetId: asset.id } })).toBe(1)
   }, 120_000)
 
-  it('rebuilds a recoverable transcript queue entry from PostgreSQL after queue loss', async () => {
+  it('rebuilds a recoverable transcript job into a real empty Redis queue from PostgreSQL', async () => {
     const { asset, run } = await createRun(shortPath, 30_000, '9')
     await database.processingRun.update({
       where: { id: run.id }, data: { status: 'PROCESSING', leaseOwner: 'dead-worker', leaseExpiresAt: new Date(0) },
     })
-    const add = vi.fn(async () => undefined)
-    await expect(enqueueRecoverableTranscriptRuns(database, { add } as never)).resolves.toEqual({ enqueued: 1 })
-    expect(add).toHaveBeenCalledWith('media.transcript_process', {
-      mediaAssetId: asset.id, processingRunId: run.id,
-    }, expect.objectContaining({ attempts: 1 }))
+    const connection = new IORedis('redis://localhost:6379', { maxRetriesPerRequest: null })
+    const queue = new Queue(`echoflow-g3-recovery-${crypto.randomUUID()}`, { connection })
+    try {
+      expect(await queue.count()).toBe(0)
+      await expect(enqueueRecoverableTranscriptRuns(database, queue)).resolves.toEqual({ enqueued: 1 })
+      const jobs = await queue.getJobs(['wait'])
+      expect(jobs).toHaveLength(1)
+      expect(jobs[0].name).toBe('media.transcript_process')
+      expect(jobs[0].data).toEqual({ mediaAssetId: asset.id, processingRunId: run.id })
+    } finally {
+      await queue.obliterate({ force: true }).catch(() => undefined)
+      await queue.close()
+      await connection.quit()
+    }
   }, 120_000)
 })

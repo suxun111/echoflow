@@ -41,7 +41,9 @@ const processTranscript = moss ? createTranscriptProcessor({ database, storage, 
 const worker = new Worker<MediaQueueJob>('echoflow-media', async (job) => {
   if (job.name === 'media.upload_verified') return processPlayback(job.data as PlaybackJob)
   if (!processTranscript || !moss) return { skipped: true, reason: 'moss_disabled' }
-  if (job.name === 'media.transcript_cancel_requested') return cancelExternalTranscriptJobs(database, moss, job.data)
+  if (job.name === 'media.transcript_cancel_requested') {
+    return cancelExternalTranscriptJobs(database, moss, job.data, new Date(), env.MOSS_JOB_TIMEOUT_SECONDS * 1000)
+  }
   return processTranscript(job.data)
 }, {
   connection,
