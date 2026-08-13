@@ -21,7 +21,7 @@ EchoFlow V1 是一个私人英语长视频影子学习工具。目标链路是�
 - G1 契约、数据库、身份和安全已通过；最终代码验证锚点为 `4bfaaba`；
 - 外部私有仓库：`https://github.com/suxun111/echoflow.git`；
 - G2 长视频上传与可播放资产已关闭；最终代码验收锚点为 `d08f6c6`，证据提交为 `3514a4e`；
-- 下一 Gate 是 G3 MOSS 与完整字幕原子发布，任务合同确认前 G3–G5 继续冻结；
+- G3 MOSS 与完整字幕原子发布已按 [任务合同](docs/G3-TASK-CONTRACT.md) 开始实施；G4–G5 继续冻结；
 - recovery、hardening、daily-goal 分支不得整体盲合。
 
 开始开发或审查前依次阅读：
@@ -31,7 +31,8 @@ EchoFlow V1 是一个私人英语长视频影子学习工具。目标链路是�
 3. [EchoFlow V1 PRD](docs/EchoFlow-V1-PRD.md)
 4. [G1 验证证据](docs/G1-VERIFICATION-EVIDENCE.md)
 5. [G2 验证证据](docs/G2-VERIFICATION-EVIDENCE.md)
-6. [G0 分支资产台账](docs/G0-BRANCH-ASSET-INVENTORY.md)
+6. [G3 任务合同](docs/G3-TASK-CONTRACT.md)
+7. [G0 分支资产台账](docs/G0-BRANCH-ASSET-INVENTORY.md)
 
 ## 工作区
 
@@ -74,6 +75,7 @@ pnpm --filter @online-learning/worker dev
 - [Execution State](docs/EXECUTION-STATE.md)
 - [G1 验证证据](docs/G1-VERIFICATION-EVIDENCE.md)
 - [G2 验证证据](docs/G2-VERIFICATION-EVIDENCE.md)
+- [G3 任务合同](docs/G3-TASK-CONTRACT.md)
 - [G0 分支资产台账](docs/G0-BRANCH-ASSET-INVENTORY.md)
 - [架构说明](docs/ARCHITECTURE.md)
 - [API 契约](docs/API.md)
