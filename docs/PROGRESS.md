@@ -1,6 +1,6 @@
 # EchoFlow 项目进度
 
-更新时间：2026-08-12
+更新时间：2026-08-13
 
 动态任务状态以 [Execution State](EXECUTION-STATE.md) 为准，产品目标以 [V1 PRD](EchoFlow-V1-PRD.md) 为准。
 
@@ -90,7 +90,7 @@ G1 契约、数据库、身份和安全
 - fresh clone 冻结安装、lint、58 个测试、Web/Admin/API/Worker build 全部通过；
 - 完整证据见 [G1 验证证据](G1-VERIFICATION-EVIDENCE.md)。
 
-## G2 代码与证据已通过，待 trunk 收口
+## G2 已完成
 
 - 浏览器真实 Multipart 私人直传、32 MiB 默认分片、并发 3 与 7 天续传已接通；
 - API 以 provider manifest、HEAD、ETag/Version 和大小完成校验，重复/并发 complete 只产生一份资产；
@@ -102,4 +102,4 @@ G1 契约、数据库、身份和安全
 - 全仓 lint、87 个默认测试、四应用 build、30 秒黄金样本及 5/30/60/120 分钟真实长媒体矩阵通过；
 - fresh clone 通过；`68a1703` 浏览器完整上传链和最终运行时代码 `8d9ac84` 的签名播放复验通过，`d08f6c6` 只增加错误 Part 测试，边界见 [G2 验证证据](G2-VERIFICATION-EVIDENCE.md)。
 
-当前只剩把证据提交并 fast-forward 至唯一 trunk；完成前不提前关闭 G2。关闭后下一步是先冻结 G3“MOSS 与完整字幕原子发布”的任务合同；G2 的绿色不代表字幕或学习闭环已完成。
+验证证据已提交为 `3514a4e` 并进入唯一 trunk，G2 的 8 项退出条件全部完成。下一步是先冻结 G3“MOSS 与完整字幕原子发布”的任务合同；G2 的绿色不代表字幕或学习闭环已完成。

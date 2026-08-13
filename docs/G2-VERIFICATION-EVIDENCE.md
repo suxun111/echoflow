@@ -1,9 +1,9 @@
 # EchoFlow G2 验证证据：长视频上传与可播放资产
 
-验证日期：2026-08-12  
-最终代码锚点：`d08f6c6`  
-实施分支：`codex/g2-long-video-upload-playback-20260812`  
-结论：退出条件 1–7 已满足，无已知 P0/P1；条件 8“证据进入唯一 trunk”待本文件提交
+验证日期：2026-08-12
+最终代码锚点：`d08f6c6`
+实施分支：`codex/g2-long-video-upload-playback-20260812`
+结论：8 项退出条件全部满足，无已知 P0/P1；G2 已关闭，G3 尚未开始
 
 ## 1. 本 Gate 交付结果
 
@@ -106,4 +106,4 @@ pnpm --filter @online-learning/worker test -- src/g2-media-matrix.test.ts
 - 长媒体矩阵使用低码率合成样本，证明的是时长、分片和处理链正确，不等于真实 8 GiB 容量压测；
 - 本地 Compose 与浏览器证据不等于公网生产部署证据。
 
-在本证据提交并 fast-forward 至唯一 trunk 前，G2 不提前宣告关闭。完成该 Git 收口后，下一步也只能在用户确认后冻结并开始 G3“MOSS 与完整字幕原子发布”，不能把本证据解释成 V1 已整体完成。
+本证据已提交为 `3514a4e` 并 fast-forward 至唯一 trunk `master`，因此条件 8 成立，G2 正式关闭。下一步也只能在用户确认后冻结并开始 G3“MOSS 与完整字幕原子发布”，不能把本证据解释成 V1 已整体完成。

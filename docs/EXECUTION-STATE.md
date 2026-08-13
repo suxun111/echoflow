@@ -1,6 +1,6 @@
 # EchoFlow Execution State
 
-更新时间：2026-08-12
+更新时间：2026-08-13
 
 此文件记录动态执行状态，不重复存放完整 PRD。长期产品决定见 [EchoFlow V1 PRD](EchoFlow-V1-PRD.md)，整体终点见 [v0.5.0-alpha.1 Goal](GOAL-v0.5.0-alpha.1.md)。
 
@@ -9,17 +9,17 @@
 | 字段 | 当前值 |
 |---|---|
 | Goal | `v0.5.0-alpha.1` |
-| Gate | `G1` 已关闭；`G2` 退出条件 1–7 已通过，条件 8“证据进入唯一 trunk”待收口；`G3` 尚未开始 |
+| Gate | `G1`、`G2` 已关闭；`G3` 尚未开始 |
 | 唯一 trunk | `master` |
 | V1 产品代码审计源点 | `42968ad` |
 | G0 文档基线 | `d01c67e`，已 fast-forward 至 master |
 | fresh-clone 修复 | `0e3c912`，已 fast-forward 至 master；来源分支为 `codex/g0-fresh-clone-topology-20260811` |
 | G1 实施分支 | `codex/g1-contract-database-auth-20260812`；最终代码锚点 `4bfaaba` |
 | G2 实施分支 | `codex/g2-long-video-upload-playback-20260812`；最终代码验收锚点 `d08f6c6` |
-| WIP | G2 证据提交与唯一 trunk 收口；无 G3 代码 WIP |
-| 产品功能开发 | G2 代码与证据已通过，待 Git 收口；G3–G5 继续冻结 |
+| WIP | 无核心纵向闭环 WIP；G3 等待任务合同与用户确认 |
+| 产品功能开发 | G2 已通过退出门；G3–G5 继续冻结 |
 | Remote | `origin = https://github.com/suxun111/echoflow.git`；Private；外部恢复验证通过 |
-| 下一人工边界 | G2 证据进入 master 后，用户确认是否冻结并开始 G3 |
+| 下一人工边界 | 用户确认是否冻结并开始 G3“MOSS 与完整字幕原子发布” |
 
 ## 2026-08-11 决策澄清
 
@@ -94,12 +94,12 @@
 ## 当前进行中
 
 - G1 已按 [验证证据](G1-VERIFICATION-EVIDENCE.md) 关闭；
-- G2 已按 [任务合同](G2-TASK-CONTRACT.md) 实现，退出证据见 [验证证据](G2-VERIFICATION-EVIDENCE.md)；
+- G2 已按 [任务合同](G2-TASK-CONTRACT.md) 实现，并由 [验证证据](G2-VERIFICATION-EVIDENCE.md) 关闭；
 - 最终代码验收锚点为 `d08f6c6`，独立 Reviewer 结论为无 P0/P1；
-- 只剩将本证据提交并 fast-forward 至唯一 trunk，完成前不提前关闭 G2；
+- 验证证据已提交为 `3514a4e` 并 fast-forward 至唯一 trunk，8 项退出条件全部成立；
 - 当前没有 G3 代码 WIP；接入 MOSS 和生成字幕必须先获得下一次任务确认。
 
-## G2 待收口证据
+## G2 关闭证据
 
 - 私人 MP4 已形成浏览器 Multipart 直传、PostgreSQL/Outbox、Redis/Worker、ffprobe/fast-start 与 owner-scoped 签名 Range 播放的真实闭环；
 - complete、cancel、过期清理与 Worker 发布使用数据库锁、lease 和最终 fencing，迟到请求与旧 Worker 不能复活或破坏已发布资产；
