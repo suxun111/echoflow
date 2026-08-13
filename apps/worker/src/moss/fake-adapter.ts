@@ -8,6 +8,11 @@ export class FakeMossAdapter implements MossAdapter {
 
   submissions = 0
 
+  async findByIdempotencyKey(idempotencyKey: string) {
+    const externalJobId = this.byKey.get(idempotencyKey)
+    return externalJobId ? { ...this.jobs.get(externalJobId)! } : null
+  }
+
   async submit(input: MossSubmitInput) {
     const existingId = this.byKey.get(input.idempotencyKey)
     if (existingId) {

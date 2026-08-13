@@ -136,7 +136,7 @@ export async function enqueuePendingTranscriptCancellations(database: PrismaClie
   const runs = await database.processingRun.findMany({
     where: {
       pipelineVersion: G3_PIPELINE_VERSION, status: 'CANCELLED',
-      chunks: { some: { externalJobId: { not: null }, externalCancelledAt: null } },
+      chunks: { some: { externalCancelledAt: null } },
     },
     select: { id: true, mediaAssetId: true }, take: 100,
   })

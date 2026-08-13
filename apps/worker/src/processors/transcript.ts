@@ -34,14 +34,32 @@ export async function cancelExternalTranscriptJobs(
   })
   if (!run) return { skipped: true, cancelled: 0 }
   const chunks = await database.processingChunk.findMany({
-    where: { processingRunId: run.id, externalJobId: { not: null }, externalCancelledAt: null },
-    select: { id: true, externalJobId: true },
+    where: { processingRunId: run.id, externalCancelledAt: null },
+    select: { id: true, externalJobId: true, idempotencyKey: true },
   })
   let cancelled = 0
   for (const chunk of chunks) {
-    await moss.cancel(chunk.externalJobId!)
+    let externalJobId = chunk.externalJobId
+    if (!externalJobId) {
+      const recovered = await moss.findByIdempotencyKey(chunk.idempotencyKey)
+      if (!recovered) {
+        const confirmed = await database.processingChunk.updateMany({
+          where: { id: chunk.id, externalJobId: null, externalCancelledAt: null },
+          data: { externalCancelledAt: now },
+        })
+        cancelled += confirmed.count
+        continue
+      }
+      const adopted = await database.processingChunk.updateMany({
+        where: { id: chunk.id, externalJobId: null, externalCancelledAt: null },
+        data: { externalJobId: recovered.externalJobId },
+      })
+      if (adopted.count !== 1) continue
+      externalJobId = recovered.externalJobId
+    }
+    await moss.cancel(externalJobId)
     const changed = await database.processingChunk.updateMany({
-      where: { id: chunk.id, externalJobId: chunk.externalJobId, externalCancelledAt: null },
+      where: { id: chunk.id, externalJobId, externalCancelledAt: null },
       data: { externalCancelledAt: now },
     })
     cancelled += changed.count

@@ -24,6 +24,7 @@ export type MossWord = { text: string; startMs: number; endMs: number }
 export type MossResult = { language: 'en'; words: MossWord[] }
 
 export interface MossAdapter {
+  findByIdempotencyKey(idempotencyKey: string): Promise<MossJob | null>
   submit(input: MossSubmitInput): Promise<MossJob>
   query(externalJobId: string): Promise<MossJob>
   result(externalJobId: string): Promise<MossResult>
@@ -161,7 +162,7 @@ export class HttpMossAdapter implements MossAdapter {
     throw lastError ?? new MossError('moss_unavailable', 'MOSS service is unavailable', true)
   }
 
-  private async findByIdempotencyKey(idempotencyKey: string): Promise<MossJob | null> {
+  async findByIdempotencyKey(idempotencyKey: string): Promise<MossJob | null> {
     try {
       const value = await this.requestOnce(`/api/jobs/by-idempotency-key/${encodeURIComponent(idempotencyKey)}`, {
         method: 'GET', headers: this.headers(),

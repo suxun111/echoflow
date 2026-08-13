@@ -236,6 +236,7 @@ describe('G3 real media pipeline with deterministic Fake MOSS', () => {
     const { asset, run } = await createRun(shortPath, 30_000, '5')
     const delegate = new FakeMossAdapter()
     const racingMoss: MossAdapter = {
+      findByIdempotencyKey: (idempotencyKey) => delegate.findByIdempotencyKey(idempotencyKey),
       submit: async (input) => {
         const submitted = await delegate.submit(input)
         await database.$transaction([
@@ -262,6 +263,36 @@ describe('G3 real media pipeline with deterministic Fake MOSS', () => {
     expect(chunk.externalJobId).toBeTruthy()
     expect(chunk.externalCancelledAt).not.toBeNull()
     await expect(delegate.query(chunk.externalJobId!)).resolves.toMatchObject({ status: 'cancelled' })
+  }, 120_000)
+
+  it('recovers an accepted MOSS job by idempotency after response loss, then cancels it', async () => {
+    const { asset, run } = await createRun(shortPath, 30_000, '12')
+    const moss = new FakeMossAdapter()
+    const processTranscript = createTranscriptProcessor({ database, storage, moss, env, workerId: 'g3-worker-cancel-recovery' })
+    await processTranscript({ mediaAssetId: asset.id, processingRunId: run.id })
+    const chunk = await database.processingChunk.findFirstOrThrow({ where: { processingRunId: run.id } })
+    const externalJobId = chunk.externalJobId!
+    await database.$transaction([
+      database.processingRun.update({
+        where: { id: run.id },
+        data: { status: 'CANCELLED', errorCode: 'processing_cancelled', leaseOwner: null, leaseExpiresAt: null },
+      }),
+      database.processingChunk.update({
+        where: { id: chunk.id },
+        data: {
+          status: 'CANCELLED', errorCode: 'processing_cancelled', externalJobId: null,
+          externalCancelledAt: null, leaseOwner: null, leaseExpiresAt: null,
+        },
+      }),
+    ])
+
+    await expect(cancelExternalTranscriptJobs(database, moss, {
+      mediaAssetId: asset.id, processingRunId: run.id,
+    })).resolves.toMatchObject({ cancelled: 1 })
+    const recovered = await database.processingChunk.findUniqueOrThrow({ where: { id: chunk.id } })
+    expect(recovered).toMatchObject({ externalJobId })
+    expect(recovered.externalCancelledAt).not.toBeNull()
+    await expect(moss.query(externalJobId)).resolves.toMatchObject({ status: 'cancelled' })
   }, 120_000)
 
   it('keeps cancellation terminal when a successful MOSS result arrives concurrently', async () => {
