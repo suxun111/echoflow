@@ -15,12 +15,12 @@ EchoFlow 已具备：
 
 EchoFlow 尚不具备：
 
-- MOSS 完整字幕与字幕原子发布；
-- 可恢复的 Outbox/Worker/MOSS 完整转写流水线；
+- 真实 MOSS 服务接入和真实长视频字幕验收；
+- 经真实供应方证明的 Outbox/Worker/MOSS 完整转写流水线；
 - 真实媒体、完整字幕、逐句练习和进度恢复纵向链路；
 - CI、生产发布和真实基础设施恢复闭环。
 
-G1 已建立真实 PostgreSQL/Auth/owner 基线，G2 已建立私人 MP4 上传与原片播放闭环；但 MOSS、字幕、影子练习和生产运维尚未闭环，因此仍不能作为完整 V1 或公开生产服务交付。
+G1 已建立真实 PostgreSQL/Auth/owner 基线，G2 已建立私人 MP4 上传与原片播放闭环，G3 已有通过独立代码审查的本地转写候选实现；但真实 MOSS、真实长视频字幕、影子练习和生产运维尚未闭环，因此仍不能作为完整 V1 或公开生产服务交付。
 
 ## 当前 Git 基线
 
@@ -109,5 +109,7 @@ G1 契约、数据库、身份和安全
 - 用户已确认开始“MOSS 与完整字幕原子发布”，实施分支为 `codex/g3-moss-transcript-20260813`；
 - [G3 任务合同](G3-TASK-CONTRACT.md) 冻结了音频规范化、长音频分片、MOSS Adapter、HMAC 回调、回调/轮询恢复、逐词时间戳、合并校验和唯一 ACTIVE 原子发布；
 - 历史 hardening/f24e/0b51 只提取错误分类、恢复和原子发布测试意图，不整体合并；
-- Fake MOSS 用于确定性故障矩阵，不能代替真实 MOSS；真实 endpoint、认证和回调协议未就绪时，G3 保持实施中而不关闭；
+- 本地实现代码锚点 `8139081` 已完成 Adapter、Fake MOSS、真实 FFmpeg 音频处理、持久 Run/Chunk、回调/轮询、恢复、精确对象版本清理和唯一 ACTIVE 原子发布；
+- 当前锚点全仓 lint、146 个测试、四应用生产构建、Prisma validate 和 Compose config 通过；4 个 G2 真实长媒体回归测试因未提供显式样本路径而跳过，G3 真实 MOSS 矩阵尚未执行；独立 Reviewer 未发现 P0/P1，详见 [G3 本地验证证据](G3-LOCAL-VERIFICATION-EVIDENCE.md)；
+- Fake MOSS 用于确定性故障矩阵，不能代替真实 MOSS；真实 endpoint、认证、供应方协议和 30 秒及 5/30/60/120 分钟样本未验证，G3 保持实施中而不关闭；
 - G4 的逐句播放器、录音回听和进度恢复以及 G5 生产发布继续冻结。

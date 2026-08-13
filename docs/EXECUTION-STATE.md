@@ -9,15 +9,15 @@
 | 字段 | 当前值 |
 |---|---|
 | Goal | `v0.5.0-alpha.1` |
-| Gate | `G1`、`G2` 已关闭；`G3` 已冻结合同并开始实施 |
+| Gate | `G1`、`G2` 已关闭；`G3` 本地实现候选已通过代码审查，但真实 MOSS 门禁未通过，Gate 保持打开 |
 | 唯一 trunk | `master` |
 | V1 产品代码审计源点 | `42968ad` |
 | G0 文档基线 | `d01c67e`，已 fast-forward 至 master |
 | fresh-clone 修复 | `0e3c912`，已 fast-forward 至 master；来源分支为 `codex/g0-fresh-clone-topology-20260811` |
 | G1 实施分支 | `codex/g1-contract-database-auth-20260812`；最终代码锚点 `4bfaaba` |
 | G2 实施分支 | `codex/g2-long-video-upload-playback-20260812`；最终代码验收锚点 `d08f6c6` |
-| G3 实施分支 | `codex/g3-moss-transcript-20260813`；基线 `master@0c3e2ee` |
-| WIP | G3“MOSS 与完整字幕原子发布”是唯一核心纵向闭环 WIP |
+| G3 实施分支 | `codex/g3-moss-transcript-20260813`；基线 `master@0c3e2ee`；本地代码验收锚点 `8139081` |
+| WIP | G3“MOSS 与完整字幕原子发布”仍是唯一核心纵向闭环；当前等待真实 MOSS 协议与样本矩阵 |
 | 产品功能开发 | G2 已通过退出门；G3 实施中，G4–G5 继续冻结 |
 | Remote | `origin = https://github.com/suxun111/echoflow.git`；Private；外部恢复验证通过 |
 | 下一人工边界 | 真实 MOSS endpoint、认证与回调协议就绪后执行真实 30 秒至 120 分钟验收；未就绪不关闭 G3 |
@@ -99,7 +99,9 @@
 - 最终代码验收锚点为 `d08f6c6`，独立 Reviewer 结论为无 P0/P1；
 - 验证证据已提交为 `3514a4e` 并 fast-forward 至唯一 trunk，8 项退出条件全部成立；
 - 用户已确认开始 G3；[G3 任务合同](G3-TASK-CONTRACT.md) 冻结为当前实施与验收边界；
-- 当前先实现 Adapter、Fake MOSS、音频分片、回调/轮询、恢复与原子发布；真实 MOSS 尚未通过前不得关闭 G3；
+- 本地 Adapter、Fake MOSS、音频分片、回调/轮询、恢复、清理与原子发布候选实现已收口到 `8139081`，独立 Reviewer 未发现 P0/P1；
+- [G3 本地验证证据](G3-LOCAL-VERIFICATION-EVIDENCE.md)记录了 146 个通过测试，以及真实 PostgreSQL/Redis/MinIO/FFmpeg、构建和静态门禁；另有 4 个 G2 真实长媒体回归测试因未提供显式样本路径而跳过，G3 真实 MOSS 矩阵尚未执行；
+- 真实 MOSS endpoint、认证、供应方字段/回调协议和 30 秒及 5/30/60/120 分钟真实样本矩阵仍未验证，因此 G3 不关闭；
 - G4 播放器、录音与进度以及 G5 生产发布继续冻结。
 
 ## G2 关闭证据

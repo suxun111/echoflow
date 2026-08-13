@@ -10,7 +10,7 @@ EchoFlow V1 是一个私人英语长视频影子学习工具。目标链路是�
 → 逐句循环、录音回听和进度恢复
 ```
 
-当前仓库已完成 G1 安全数据基线和 G2 私人长视频上传/原片播放闭环，但 MOSS 字幕、影子练习与生产发布尚未接通。不要根据页面、接口或 Worker 文件存在就判断 V1 已整体完成。
+当前仓库已完成 G1 安全数据基线、G2 私人长视频上传/原片播放闭环，以及 G3 的本地转写流水线候选实现；真实 MOSS、真实长视频字幕验收、影子练习与生产发布仍未接通。不要根据 Fake MOSS、页面、接口或 Worker 文件存在就判断 V1 已整体完成。
 
 ## 当前执行基线
 
@@ -21,7 +21,7 @@ EchoFlow V1 是一个私人英语长视频影子学习工具。目标链路是�
 - G1 契约、数据库、身份和安全已通过；最终代码验证锚点为 `4bfaaba`；
 - 外部私有仓库：`https://github.com/suxun111/echoflow.git`；
 - G2 长视频上传与可播放资产已关闭；最终代码验收锚点为 `d08f6c6`，证据提交为 `3514a4e`；
-- G3 MOSS 与完整字幕原子发布已按 [任务合同](docs/G3-TASK-CONTRACT.md) 开始实施；G4–G5 继续冻结；
+- G3 本地实现代码锚点为 `8139081`，独立 Reviewer 未发现 P0/P1；[本地验证证据](docs/G3-LOCAL-VERIFICATION-EVIDENCE.md) 不等于真实 MOSS 验收，G3 仍保持打开；G4–G5 继续冻结；
 - recovery、hardening、daily-goal 分支不得整体盲合。
 
 开始开发或审查前依次阅读：
@@ -32,14 +32,15 @@ EchoFlow V1 是一个私人英语长视频影子学习工具。目标链路是�
 4. [G1 验证证据](docs/G1-VERIFICATION-EVIDENCE.md)
 5. [G2 验证证据](docs/G2-VERIFICATION-EVIDENCE.md)
 6. [G3 任务合同](docs/G3-TASK-CONTRACT.md)
-7. [G0 分支资产台账](docs/G0-BRANCH-ASSET-INVENTORY.md)
+7. [G3 本地验证证据](docs/G3-LOCAL-VERIFICATION-EVIDENCE.md)
+8. [G0 分支资产台账](docs/G0-BRANCH-ASSET-INVENTORY.md)
 
 ## 工作区
 
 - `apps/web`：React + Vite 学习端；当前已接通 OTP、“我的视频”、私人上传任务和原片播放，字幕学习仍待 G3/G4。
 - `apps/admin`：React + Vite 管理端骨架；V1 只保留内部任务支持能力。
 - `apps/api`：NestJS API；当前生产入口包含 G1 身份/owner 基线与 G2 上传、媒体资产和签名播放接口，旧公共内容原型不进入 V1 主路径。
-- `apps/worker`：BullMQ + PostgreSQL Outbox 媒体 Worker；G2 已接通真实探测、fast-start、任务恢复和 lease fencing，MOSS 转写留到 G3。
+- `apps/worker`：BullMQ + PostgreSQL Outbox 媒体 Worker；G2 已接通真实探测与 fast-start，G3 已实现可恢复的转写、清理和原子字幕发布候选链路，但生产 MOSS Adapter 尚未用真实服务验收。
 - `packages/contracts`：Zod 契约和跨端共享类型。
 - `packages/config`：服务端环境变量解析。
 - `packages/ui`：共享 UI token 与基础组件。
@@ -76,6 +77,7 @@ pnpm --filter @online-learning/worker dev
 - [G1 验证证据](docs/G1-VERIFICATION-EVIDENCE.md)
 - [G2 验证证据](docs/G2-VERIFICATION-EVIDENCE.md)
 - [G3 任务合同](docs/G3-TASK-CONTRACT.md)
+- [G3 本地验证证据](docs/G3-LOCAL-VERIFICATION-EVIDENCE.md)
 - [G0 分支资产台账](docs/G0-BRANCH-ASSET-INVENTORY.md)
 - [架构说明](docs/ARCHITECTURE.md)
 - [API 契约](docs/API.md)

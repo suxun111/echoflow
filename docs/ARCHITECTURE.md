@@ -53,7 +53,7 @@ flowchart LR
 
 Run/Chunk 采用 lease/CAS 与最终 fencing；旧 Worker 在提交分片、拉取结果和发布前都必须重新证明当前租约。外部任务 ID、幂等键、回调时间、取消状态和对象版本均持久化，部署时模型配置变化不会改写既有 Chunk 的模型来源。
 
-所有 G3 临时对象都先在 PostgreSQL 预留 `PENDING` 身份和预期 checksum/大小，再执行对象存储写入；响应丢失或进程崩溃后，接管 Worker 按稳定 object key 恢复并转为 `READY`，清理器始终有可扫描的数据库身份。Redis 丢消息由恢复扫描重建；失败只重试所需阶段或分片。Fake MOSS 只用于确定性故障测试，不是生产替代品。
+所有 G3 临时对象都先在 PostgreSQL 预留 `PENDING` 身份，再使用不可变的物理 attempt key 写入对象存储；逻辑对象身份与每个实际 Version 都可追踪。上传响应丢失、进程崩溃或迟到完成时，接管 Worker 通过对象事实恢复；清理采用“短事务提交 tombstone → 事务外按非空 exact Version 删除 → 短事务 CAS 标记 purged”，不会依赖长数据库事务保护网络删除。Redis 丢消息由恢复扫描重建；失败只重试所需阶段或分片。Fake MOSS 只用于确定性故障测试，不是生产替代品。
 
 ## 数据与存储
 
@@ -63,7 +63,7 @@ Run/Chunk 采用 lease/CAS 与最终 fencing；旧 Worker 在提交分片、拉�
 
 ## 验证状态
 
-当前本地实现已通过定向 TypeScript、单元测试、真实 PostgreSQL/MinIO/Redis/FFmpeg 集成和生产构建；其中 Fake MOSS 已覆盖成功、单片失败后定向恢复、提交/完成与取消竞态、租约接管、对象写入响应丢失、checksum 损坏、发布事务回滚、队列重建和清理。G3 尚缺真实 MOSS endpoint/协议和 30 秒及 5/30/60/120 分钟真实矩阵，因此当前验证不能关闭 G3。
+代码锚点 `8139081` 已通过全仓 TypeScript 检查、146 个自动化测试、真实 PostgreSQL/MinIO/Redis/FFmpeg 集成和生产构建；其中 Fake MOSS 覆盖成功、单片失败后定向恢复、提交/完成与取消竞态、租约 generation 接管、对象写入响应丢失、checksum 损坏、发布事务回滚、队列重建和清理，独立 Reviewer 未发现 P0/P1。G3 尚缺真实 MOSS endpoint/协议和 30 秒及 5/30/60/120 分钟真实矩阵，因此当前验证不能关闭 G3。完整边界见 [G3 本地验证证据](G3-LOCAL-VERIFICATION-EVIDENCE.md)。
 
 常用全仓门禁：
 
