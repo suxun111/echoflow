@@ -271,6 +271,9 @@ describe('G3 real media pipeline with deterministic Fake MOSS', () => {
     })
     const cleanup = cleanupTranscriptObjects(database, cleanupStorage)
     await cleanupStarted
+    expect(await database.mediaObject.findUniqueOrThrow({ where: { id: normalized.id } })).toMatchObject({
+      deletedAt: expect.any(Date), purgedAt: null,
+    })
     await database.processingRun.update({
       where: { id: run.id }, data: { status: 'QUEUED', stage: 'PLAYBACK_READY', errorCode: null, leaseOwner: null, leaseExpiresAt: null },
     })
@@ -491,6 +494,36 @@ describe('G3 real media pipeline with deterministic Fake MOSS', () => {
     expect(await database.processingChunk.findUniqueOrThrow({ where: { id: chunk.id } })).toMatchObject({ status: 'CANCELLED' })
     expect(await database.transcriptVersion.count({ where: { mediaAssetId: asset.id } })).toBe(0)
     expect(await database.mediaObject.count({ where: { mediaAssetId: asset.id, kind: 'ASR_RAW' } })).toBe(0)
+  }, 120_000)
+
+  it('prevents a stale run generation from releasing or failing a claimed MOSS chunk', async () => {
+    const { asset, run } = await createRun(shortPath, 30_000, '30')
+    class RunTakeoverOnQueryMoss extends FakeMossAdapter {
+      takeover = false
+      override async query(externalJobId: string) {
+        if (this.takeover) {
+          await database.processingRun.update({
+            where: { id: run.id },
+            data: { leaseOwner: 'g3-new-generation', leaseExpiresAt: new Date(Date.now() + 60_000) },
+          })
+        }
+        return super.query(externalJobId)
+      }
+    }
+    const moss = new RunTakeoverOnQueryMoss()
+    const processor = createTranscriptProcessor({ database, storage, moss, env, workerId: 'g3-chunk-generation' })
+    await processor({ mediaAssetId: asset.id, processingRunId: run.id })
+    const chunk = await database.processingChunk.findFirstOrThrow({ where: { processingRunId: run.id } })
+    await database.processingChunk.update({ where: { id: chunk.id }, data: { nextPollAt: new Date(0) } })
+    moss.takeover = true
+
+    await expect(processor({ mediaAssetId: asset.id, processingRunId: run.id }))
+      .resolves.toMatchObject({ skipped: true, leaseLost: true })
+    const fenced = await database.processingChunk.findUniqueOrThrow({ where: { id: chunk.id } })
+    expect(fenced.status).toBe('PROCESSING')
+    expect(fenced.nextPollAt).toEqual(new Date(0))
+    expect(fenced.leaseOwner).toMatch(/^g3-chunk-generation:/)
+    expect((await database.processingRun.findUniqueOrThrow({ where: { id: run.id } })).leaseOwner).toBe('g3-new-generation')
   }, 120_000)
 
   it('fences a stale result worker, lets a replacement take over, and preserves the chunk model provenance', async () => {

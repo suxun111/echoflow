@@ -155,6 +155,20 @@ export function createTranscriptProcessor(options: TranscriptProcessorOptions) {
     if (!run) throw new TranscriptLeaseLostError('transcript_lease_lost')
   }
 
+  async function withRunFence<T>(runId: string, action: (transaction: Prisma.TransactionClient) => Promise<T>) {
+    return options.database.$transaction(async (transaction) => {
+      const runFence = await transaction.processingRun.updateMany({
+        where: {
+          id: runId, status: 'PROCESSING', leaseOwner: leaseOwner(),
+          leaseExpiresAt: { gt: now() },
+        },
+        data: { leaseExpiresAt: new Date(now().getTime() + 5 * 60_000) },
+      })
+      if (runFence.count !== 1) throw new TranscriptLeaseLostError('transcript_lease_lost')
+      return action(transaction)
+    })
+  }
+
   function isMissingObject(error: unknown) {
     return typeof error === 'object' && error !== null && 'code' in error
       && ['NoSuchKey', 'NoSuchVersion', 'NotFound'].includes(String((error as { code?: unknown }).code))
@@ -535,13 +549,13 @@ export function createTranscriptProcessor(options: TranscriptProcessorOptions) {
     for (const chunk of chunks) {
       if (chunk.status === 'SUCCEEDED' || chunk.status === 'CANCELLED' || chunk.status === 'FAILED') continue
       const chunkLeaseExpiresAt = new Date(now().getTime() + 5 * 60_000)
-      const claimed = await options.database.processingChunk.updateMany({
-        where: {
-          id: chunk.id, status: { in: ['QUEUED', 'PROCESSING'] },
-          OR: [{ leaseOwner: null }, { leaseExpiresAt: { lt: now() } }],
-        },
-        data: { leaseOwner: leaseOwner(), leaseExpiresAt: chunkLeaseExpiresAt },
-      })
+      const claimed = await withRunFence(run.id, (transaction) => transaction.processingChunk.updateMany({
+          where: {
+            id: chunk.id, status: { in: ['QUEUED', 'PROCESSING'] },
+            OR: [{ leaseOwner: null }, { leaseExpiresAt: { lt: now() } }],
+          },
+          data: { leaseOwner: leaseOwner(), leaseExpiresAt: chunkLeaseExpiresAt },
+        }))
       if (claimed.count !== 1) continue
       const ownedChunk = await options.database.processingChunk.findUniqueOrThrow({ where: { id: chunk.id } })
       try {
@@ -577,17 +591,55 @@ export function createTranscriptProcessor(options: TranscriptProcessorOptions) {
             language: 'en', modelVersion: ownedChunk.modelVersion,
             chunkIndex: ownedChunk.chunkIndex, startMs: ownedChunk.startMs, endMs: ownedChunk.endMs,
           })
-          const persisted = await options.database.processingChunk.updateMany({
-            where: {
-              id: ownedChunk.id, status: 'QUEUED', externalJobId: null,
-              leaseOwner: leaseOwner(), leaseExpiresAt: { gt: now() },
-            },
-            data: {
-              status: 'PROCESSING', externalJobId: submitted.externalJobId, submittedAt: submissionStartedAt,
-              nextPollAt: new Date(now().getTime() + options.env.MOSS_POLL_INTERVAL_SECONDS * 1000),
-              leaseOwner: null, leaseExpiresAt: null,
-            },
-          })
+          let persisted
+          try {
+            persisted = await withRunFence(run.id, (transaction) => transaction.processingChunk.updateMany({
+              where: {
+                id: ownedChunk.id, status: 'QUEUED', externalJobId: null,
+                leaseOwner: leaseOwner(), leaseExpiresAt: { gt: now() },
+              },
+              data: {
+                status: 'PROCESSING', externalJobId: submitted.externalJobId, submittedAt: submissionStartedAt,
+                nextPollAt: new Date(now().getTime() + options.env.MOSS_POLL_INTERVAL_SECONDS * 1000),
+                leaseOwner: null, leaseExpiresAt: null,
+              },
+            }))
+          } catch (error) {
+            if (!(error instanceof TranscriptLeaseLostError)) throw error
+            const reconciled = await options.database.processingChunk.updateMany({
+              where: {
+                id: ownedChunk.id, status: { in: ['QUEUED', 'PROCESSING', 'CANCELLED'] },
+                externalJobId: null, idempotencyKey: submitted.idempotencyKey,
+              },
+              data: { externalJobId: submitted.externalJobId, submittedAt: submissionStartedAt },
+            })
+            const latest = reconciled.count === 1
+              ? await options.database.processingChunk.findUnique({
+                  where: { id: ownedChunk.id }, select: { status: true, externalJobId: true },
+                })
+              : null
+            if (latest?.status === 'CANCELLED' && latest.externalJobId === submitted.externalJobId) {
+              try {
+                await options.moss.cancel(submitted.externalJobId)
+                await options.database.processingChunk.updateMany({
+                  where: {
+                    id: ownedChunk.id, status: 'CANCELLED', externalJobId: submitted.externalJobId,
+                    externalCancelledAt: null,
+                  },
+                  data: { externalCancelledAt: now() },
+                })
+              } catch {
+                // The persisted external id is recovered by the cancellation scanner.
+              }
+            } else if (reconciled.count !== 1) {
+              try {
+                await options.moss.cancel(submitted.externalJobId)
+              } catch {
+                // A stable provider identity is still recoverable by idempotency lookup.
+              }
+            }
+            throw error
+          }
           if (persisted.count !== 1) {
             const adoptedCancellation = await options.database.processingChunk.updateMany({
               where: { id: ownedChunk.id, status: 'CANCELLED', externalJobId: null },
@@ -633,16 +685,27 @@ export function createTranscriptProcessor(options: TranscriptProcessorOptions) {
           continue
         }
         if (ownedChunk.nextPollAt && ownedChunk.nextPollAt.getTime() > now().getTime()) {
-          await options.database.processingChunk.updateMany({
-            where: {
-              id: ownedChunk.id, leaseOwner: leaseOwner(),
-              leaseExpiresAt: { gt: now() },
-            },
-            data: { leaseOwner: null, leaseExpiresAt: null },
-          })
+          await withRunFence(run.id, (transaction) => transaction.processingChunk.updateMany({
+              where: {
+                id: ownedChunk.id, leaseOwner: leaseOwner(),
+                leaseExpiresAt: { gt: now() },
+              },
+              data: { leaseOwner: null, leaseExpiresAt: null },
+            }))
           continue
         }
         if (ownedChunk.submittedAt && now().getTime() - ownedChunk.submittedAt.getTime() > options.env.MOSS_JOB_TIMEOUT_SECONDS * 1000) {
+          const failed = await withRunFence(run.id, (transaction) => transaction.processingChunk.updateMany({
+              where: {
+                id: ownedChunk.id, leaseOwner: leaseOwner(),
+                leaseExpiresAt: { gt: now() },
+              },
+              data: {
+                status: 'FAILED', errorCode: 'moss_timeout', failedAt: now(), nextPollAt: null,
+                externalCancelledAt: null, leaseOwner: null, leaseExpiresAt: null,
+              },
+            }))
+          if (failed.count !== 1) throw new TranscriptLeaseLostError('transcript_chunk_fence_lost')
           let cancelled = false
           try {
             await options.moss.cancel(ownedChunk.externalJobId)
@@ -650,43 +713,42 @@ export function createTranscriptProcessor(options: TranscriptProcessorOptions) {
           } catch {
             // Persist the external id and leave cancellation unconfirmed for the recovery scanner.
           }
-          await options.database.processingChunk.updateMany({
-            where: {
-              id: ownedChunk.id, leaseOwner: leaseOwner(),
-              leaseExpiresAt: { gt: now() },
-            },
-            data: {
-              status: 'FAILED', errorCode: 'moss_timeout', failedAt: now(), nextPollAt: null,
-              externalCancelledAt: cancelled ? now() : null, leaseOwner: null, leaseExpiresAt: null,
-            },
-          })
+          if (cancelled) {
+            await options.database.processingChunk.updateMany({
+              where: {
+                id: ownedChunk.id, status: 'FAILED', errorCode: 'moss_timeout',
+                externalJobId: ownedChunk.externalJobId, externalCancelledAt: null,
+              },
+              data: { externalCancelledAt: now() },
+            })
+          }
           continue
         }
         const external = await options.moss.query(ownedChunk.externalJobId)
         if (external.status === 'queued' || external.status === 'processing') {
-          await options.database.processingChunk.updateMany({
-            where: {
-              id: ownedChunk.id, leaseOwner: leaseOwner(),
-              leaseExpiresAt: { gt: now() },
-            },
-            data: {
-              nextPollAt: new Date(now().getTime() + options.env.MOSS_POLL_INTERVAL_SECONDS * 1000),
-              leaseOwner: null, leaseExpiresAt: null,
-            },
-          })
+          await withRunFence(run.id, (transaction) => transaction.processingChunk.updateMany({
+              where: {
+                id: ownedChunk.id, leaseOwner: leaseOwner(),
+                leaseExpiresAt: { gt: now() },
+              },
+              data: {
+                nextPollAt: new Date(now().getTime() + options.env.MOSS_POLL_INTERVAL_SECONDS * 1000),
+                leaseOwner: null, leaseExpiresAt: null,
+              },
+            }))
           continue
         }
         if (external.status === 'failed' || external.status === 'cancelled') {
-          await options.database.processingChunk.updateMany({
-            where: {
-              id: ownedChunk.id, leaseOwner: leaseOwner(),
-              leaseExpiresAt: { gt: now() },
-            },
-            data: {
-              status: 'FAILED', errorCode: external.errorCode ?? 'moss_rejected', failedAt: now(), nextPollAt: null,
-              leaseOwner: null, leaseExpiresAt: null,
-            },
-          })
+          await withRunFence(run.id, (transaction) => transaction.processingChunk.updateMany({
+              where: {
+                id: ownedChunk.id, leaseOwner: leaseOwner(),
+                leaseExpiresAt: { gt: now() },
+              },
+              data: {
+                status: 'FAILED', errorCode: external.errorCode ?? 'moss_rejected', failedAt: now(), nextPollAt: null,
+                leaseOwner: null, leaseExpiresAt: null,
+              },
+            }))
           continue
         }
         await completeChunk(run, {
@@ -698,18 +760,18 @@ export function createTranscriptProcessor(options: TranscriptProcessorOptions) {
         const attempt = ownedChunk.attempt + 1
         const normalized = error instanceof MossError ? error : new MossError('moss_unavailable', 'MOSS operation failed', true)
         const terminal = !normalized.retryable || attempt >= options.env.MOSS_MAX_ATTEMPTS
-        await options.database.processingChunk.updateMany({
-          where: {
-            id: ownedChunk.id, status: { in: ['QUEUED', 'PROCESSING'] }, leaseOwner: leaseOwner(),
-            leaseExpiresAt: { gt: now() },
-          },
-          data: {
-            status: terminal ? 'FAILED' : ownedChunk.externalJobId ? 'PROCESSING' : 'QUEUED',
-            attempt, errorCode: normalized.code, errorDetail: { retryable: normalized.retryable },
-            failedAt: terminal ? now() : null, nextPollAt: terminal ? null : retryAt(now(), attempt),
-            leaseOwner: null, leaseExpiresAt: null,
-          },
-        })
+        await withRunFence(run.id, (transaction) => transaction.processingChunk.updateMany({
+            where: {
+              id: ownedChunk.id, status: { in: ['QUEUED', 'PROCESSING'] }, leaseOwner: leaseOwner(),
+              leaseExpiresAt: { gt: now() },
+            },
+            data: {
+              status: terminal ? 'FAILED' : ownedChunk.externalJobId ? 'PROCESSING' : 'QUEUED',
+              attempt, errorCode: normalized.code, errorDetail: { retryable: normalized.retryable },
+              failedAt: terminal ? now() : null, nextPollAt: terminal ? null : retryAt(now(), attempt),
+              leaseOwner: null, leaseExpiresAt: null,
+            },
+          }))
       }
     }
     chunks = await options.database.processingChunk.findMany({ where: { processingRunId: run.id }, orderBy: { chunkIndex: 'asc' } })

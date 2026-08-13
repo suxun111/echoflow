@@ -37,74 +37,106 @@ export async function cleanupTranscriptObjects(
     const processingRunId = metadataRunId(object.metadata)
     if (!processingRunId) continue
     try {
-      const purged = await database.$transaction(async (transaction) => {
+      const reserved = await database.$transaction(async (transaction) => {
         const objectIdentity = `${object.bucket}:${object.objectKey}`
         await transaction.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${objectIdentity}, 0))`
         const current = await transaction.mediaObject.findUnique({ where: { id: object.id } })
-        if (!current || current.purgedAt) return false
+        if (!current || current.purgedAt) return null
         const currentRunId = metadataRunId(current.metadata)
-        if (currentRunId !== processingRunId) return false
+        if (currentRunId !== processingRunId) return null
         const run = await transaction.processingRun.findFirst({
           where: { id: processingRunId, mediaAssetId: current.mediaAssetId }, select: { status: true },
         })
-        if (!run || !['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(run.status)) return false
+        if (!run || !['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(run.status)) return null
         const retentionMs = current.kind === 'ASR_RAW'
           ? 7 * 24 * 60 * 60_000
           : 24 * 60 * 60_000
-        if (current.createdAt.getTime() > now.getTime() - retentionMs) return false
+        if (current.createdAt.getTime() > now.getTime() - retentionMs) return null
         if (!current.deletedAt) {
           const tombstoned = await transaction.mediaObject.updateMany({
             where: { id: current.id, versionId: current.versionId, deletedAt: null, purgedAt: null },
             data: { deletedAt: now },
           })
-          if (tombstoned.count !== 1) return false
+          if (tombstoned.count !== 1) return null
         }
-        let removedVersionId = current.versionId
-        if (removedVersionId) {
-          try {
-            await storage.remove(current.objectKey, removedVersionId)
-          } catch (error) {
-            if (!isMissingObject(error)) throw error
-          }
-        } else {
-          try {
-            const latest = await storage.statObject(current.objectKey, null)
-            if (!latest.versionId) throw new Error('object_store_version_required')
+        return {
+          id: current.id, bucket: current.bucket, objectKey: current.objectKey,
+          versionId: current.versionId,
+        }
+      }, { maxWait: 10_000, timeout: 30_000 })
+      if (!reserved) continue
+
+      let removalVersionId = reserved.versionId
+      if (!removalVersionId) {
+        try {
+          const latest = await storage.statObject(reserved.objectKey, null)
+          if (!latest.versionId) throw new Error('object_store_version_required')
+          const identity = await database.$transaction(async (transaction) => {
+            const objectIdentity = `${reserved.bucket}:${reserved.objectKey}`
+            await transaction.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${objectIdentity}, 0))`
+            const current = await transaction.mediaObject.findFirst({
+              where: { id: reserved.id, versionId: null, deletedAt: { not: null }, purgedAt: null },
+            })
+            if (!current) return { versionId: null, finalized: false }
             const tracked = await transaction.mediaObject.findFirst({
               where: {
-                id: { not: current.id },
-                bucket: current.bucket,
-                objectKey: current.objectKey,
-                versionId: latest.versionId,
+                id: { not: current.id }, bucket: current.bucket,
+                objectKey: current.objectKey, versionId: latest.versionId,
+                purgedAt: null,
               },
-              select: { id: true, purgedAt: true },
+              select: { id: true },
             })
-            if (tracked?.purgedAt) {
-              await storage.remove(current.objectKey, latest.versionId)
-            } else if (!tracked) {
-              await storage.remove(current.objectKey, latest.versionId)
-              removedVersionId = latest.versionId
-            } else {
-              return false
-            }
-          } catch (error) {
-            if (isMissingObject(error)) {
+            if (tracked) {
               const finalized = await transaction.mediaObject.updateMany({
-                where: { id: current.id, versionId: null, purgedAt: null },
+                where: { id: current.id, versionId: null, deletedAt: { not: null }, purgedAt: null },
                 data: { purgedAt: now },
               })
-              return finalized.count === 1
+              return { versionId: null, finalized: finalized.count === 1 }
             }
-            throw error
+            const identified = await transaction.mediaObject.updateMany({
+              where: { id: current.id, versionId: null, deletedAt: { not: null }, purgedAt: null },
+              data: { versionId: latest.versionId },
+            })
+            return { versionId: identified.count === 1 ? latest.versionId : null, finalized: false }
+          }, { maxWait: 10_000, timeout: 30_000 })
+          if (identity.finalized) {
+            cleaned += 1
+            continue
           }
+          removalVersionId = identity.versionId
+          if (!removalVersionId) continue
+        } catch (error) {
+          if (!isMissingObject(error)) throw error
+          const finalized = await database.$transaction(async (transaction) => {
+            const objectIdentity = `${reserved.bucket}:${reserved.objectKey}`
+            await transaction.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${objectIdentity}, 0))`
+            return transaction.mediaObject.updateMany({
+              where: { id: reserved.id, versionId: null, deletedAt: { not: null }, purgedAt: null },
+              data: { purgedAt: now },
+            })
+          }, { maxWait: 10_000, timeout: 30_000 })
+          if (finalized.count === 1) cleaned += 1
+          continue
         }
-        const finalized = await transaction.mediaObject.updateMany({
-          where: { id: current.id, versionId: current.versionId, purgedAt: null },
-          data: { versionId: removedVersionId, purgedAt: now },
+      }
+
+      try {
+        await storage.remove(reserved.objectKey, removalVersionId)
+      } catch (error) {
+        if (!isMissingObject(error)) throw error
+      }
+      const finalized = await database.$transaction(async (transaction) => {
+        const objectIdentity = `${reserved.bucket}:${reserved.objectKey}`
+        await transaction.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${objectIdentity}, 0))`
+        return transaction.mediaObject.updateMany({
+          where: {
+            id: reserved.id, versionId: removalVersionId,
+            deletedAt: { not: null }, purgedAt: null,
+          },
+          data: { purgedAt: now },
         })
-        return finalized.count === 1
-      }, { maxWait: 10 * 60_000, timeout: 30 * 60_000 })
-      if (purged) cleaned += 1
+      }, { maxWait: 10_000, timeout: 30_000 })
+      if (finalized.count === 1) cleaned += 1
     } catch (error) {
       failed += 1
     }
