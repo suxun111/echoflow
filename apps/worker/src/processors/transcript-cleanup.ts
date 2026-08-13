@@ -40,7 +40,7 @@ export async function cleanupTranscriptObjects(
         where: { id: processingRunId, mediaAssetId: object.mediaAssetId }, select: { status: true },
       })
       if (!run || !['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(run.status)) return false
-      const retentionMs = object.kind === 'ASR_RAW' || run.status !== 'SUCCEEDED'
+      const retentionMs = object.kind === 'ASR_RAW'
         ? 7 * 24 * 60 * 60_000
         : 24 * 60 * 60_000
       if (object.createdAt.getTime() > now.getTime() - retentionMs) return false

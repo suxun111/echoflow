@@ -55,6 +55,7 @@ type HttpMossAdapterOptions = {
   env: ServerEnv
   fetchImpl?: FetchLike
   sleep?: (milliseconds: number) => Promise<void>
+  random?: () => number
 }
 
 const retryableStatuses = new Set([408, 425, 429, 500, 502, 503, 504])
@@ -97,6 +98,7 @@ export class HttpMossAdapter implements MossAdapter {
   private readonly baseUrl: string
   private readonly fetchImpl: FetchLike
   private readonly sleep: (milliseconds: number) => Promise<void>
+  private readonly random: () => number
 
   constructor(private readonly options: HttpMossAdapterOptions) {
     if (!options.env.MOSS_ENABLED || !options.env.MOSS_BASE_URL || !options.env.MOSS_API_TOKEN) {
@@ -105,6 +107,7 @@ export class HttpMossAdapter implements MossAdapter {
     this.baseUrl = options.env.MOSS_BASE_URL.replace(/\/$/, '')
     this.fetchImpl = options.fetchImpl ?? ((input, init) => fetch(input, init))
     this.sleep = options.sleep ?? defaultSleep
+    this.random = options.random ?? Math.random
   }
 
   private headers(body = false) {
@@ -151,7 +154,8 @@ export class HttpMossAdapter implements MossAdapter {
         const normalized = error instanceof MossError ? error : new MossError('moss_unavailable', 'MOSS service is unavailable', true)
         if (!normalized.retryable || attempt + 1 === this.options.env.MOSS_MAX_ATTEMPTS) throw normalized
         lastError = normalized
-        await this.sleep(Math.min(30_000, 500 * (2 ** attempt)))
+        const base = Math.min(30_000, 500 * (2 ** attempt))
+        await this.sleep(Math.round(base * (0.75 + this.random() * 0.5)))
       }
     }
     throw lastError ?? new MossError('moss_unavailable', 'MOSS service is unavailable', true)
@@ -172,8 +176,11 @@ export class HttpMossAdapter implements MossAdapter {
   async submit(input: MossSubmitInput) {
     return this.retry(async () => {
       const existing = await this.findByIdempotencyKey(input.idempotencyKey)
-      if (existing) return existing
-      const value = await this.requestOnce('/api/jobs', {
+      if (existing && !['failed', 'cancelled'].includes(existing.status)) return existing
+      const path = existing
+        ? `/api/jobs/${encodeURIComponent(existing.externalJobId)}/retry`
+        : '/api/jobs'
+      const value = await this.requestOnce(path, {
         method: 'POST', headers: this.headers(true), body: JSON.stringify(input),
       })
       const job = parseJob(value)

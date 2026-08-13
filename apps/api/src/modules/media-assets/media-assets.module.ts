@@ -179,6 +179,7 @@ export class MediaAssetsController {
         data: {
           status: 'QUEUED', attempt: 0, failedAt: null, nextPollAt: new Date(),
           errorCode: null, errorDetail: Prisma.DbNull, externalJobId: null,
+          externalUpdatedAt: null, externalCancelledAt: null, submittedAt: null, completedAt: null,
         },
       })
       await transaction.processingRun.update({

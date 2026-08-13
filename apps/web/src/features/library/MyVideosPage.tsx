@@ -38,6 +38,7 @@ export function MyVideosPage({ api, search, onUpload }: { api: ApiClient; search
   const videoRef = useRef<HTMLVideoElement>(null)
   const resumeTime = useRef(0)
   const playbackRefreshes = useRef(0)
+  const retryKeys = useRef<Record<string, string>>({})
 
   const loadAssets = useCallback(async () => {
     await api.fetchJson<{ items: MediaAssetView[] }>('/media-assets')
@@ -72,10 +73,18 @@ export function MyVideosPage({ api, search, onUpload }: { api: ApiClient; search
   }
 
   async function retryTranscript(asset: MediaAssetView) {
+    const storageKey = `echoflow:transcript-retry:${asset.id}`
+    const idempotencyKey = retryKeys.current[asset.id]
+      ?? window.sessionStorage.getItem(storageKey)
+      ?? `web-${crypto.randomUUID()}`
+    retryKeys.current[asset.id] = idempotencyKey
+    window.sessionStorage.setItem(storageKey, idempotencyKey)
     try {
       await api.fetchJson(`/media-assets/${asset.id}/transcript/retry`, {
-        method: 'POST', headers: { 'Idempotency-Key': `web-${crypto.randomUUID()}` },
+        method: 'POST', headers: { 'Idempotency-Key': idempotencyKey },
       })
+      delete retryKeys.current[asset.id]
+      window.sessionStorage.removeItem(storageKey)
       await loadAssets()
     } catch (reason) { setError(reason instanceof Error ? reason.message : '暂时无法重试字幕任务') }
   }
@@ -83,7 +92,7 @@ export function MyVideosPage({ api, search, onUpload }: { api: ApiClient; search
   return <main className="my-videos-page">
     <header className="private-library-heading"><div><p>MY PRIVATE VIDEOS</p><h1>我的视频</h1><span>这里只显示当前账号真实上传的媒体资产。</span></div><button onClick={onUpload}><Icon name="upload" size={16}/>上传新视频</button></header>
     {error && <p className="upload-error" role="alert">{error}</p>}
-    {loading ? <div className="private-library-empty">正在读取私人媒体…</div> : filtered.length === 0 ? <section className="private-library-empty"><span className="drop-wave"><i/><i/><i/><i/><i/></span><h2>{search ? '没有匹配的视频' : '从一段真正想练的英语开始'}</h2><p>{search ? '换一个标题关键词，或清空搜索。' : '上传后先验证原始清晰度播放；完整英文字幕将在 G3 接入。'}</p>{!search && <button onClick={onUpload}>上传第一段视频</button>}</section> : <section className="private-media-grid">
+    {loading ? <div className="private-library-empty">正在读取私人媒体…</div> : filtered.length === 0 ? <section className="private-library-empty"><span className="drop-wave"><i/><i/><i/><i/><i/></span><h2>{search ? '没有匹配的视频' : '从一段真正想练的英语开始'}</h2><p>{search ? '换一个标题关键词，或清空搜索。' : '上传后先准备原片播放；MOSS 可用时会自动生成完整英文字幕。'}</p>{!search && <button onClick={onUpload}>上传第一段视频</button>}</section> : <section className="private-media-grid">
       {filtered.map((asset) => { const copy = transcriptCopy(asset); return <article key={asset.id}>
         <div className="private-media-cover"><span className="drop-wave"><i/><i/><i/><i/><i/></span><small>{copy.tone === 'ready' ? 'TRANSCRIPT READY' : asset.status === 'playable' ? 'ORIGINAL PLAYABLE' : 'CHECKING MEDIA'}</small></div>
         <div className="private-media-copy"><span data-tone={copy.tone}>{asset.status === 'playable' ? copy.label : asset.status === 'failed' ? '不支持播放' : '正在检查原片'}</span><h2>{asset.title}</h2><p>{asset.originalName} · {asset.status === 'failed' ? '请上传 MP4 / H.264 / AAC 文件' : durationLabel(asset.durationMs)}</p>{asset.status === 'playable' && <p className="transcript-status-copy">{copy.detail}</p>}<div className="private-media-actions">{asset.status === 'playable' ? <button onClick={() => { playbackRefreshes.current = 0; void openPlayback(asset, false) }}><Icon name="play" size={14}/>播放原片</button> : <button onClick={onUpload}>查看处理任务</button>}{copy.tone === 'ready' && <button onClick={() => void openTranscript(asset)}>查看字幕</button>}{copy.tone === 'failed' && <button onClick={() => void retryTranscript(asset)}>重试字幕</button>}</div></div>

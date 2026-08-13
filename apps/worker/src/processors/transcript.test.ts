@@ -1,13 +1,15 @@
 import { execFile } from 'node:child_process'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import type { ServerEnv } from '@online-learning/config'
 import { PrismaClient } from '@online-learning/database'
-import { MinioStorageProvider } from '@online-learning/storage'
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { MinioStorageProvider, type MultipartStorageProvider } from '@online-learning/storage'
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { MossAdapter } from '../moss/adapter'
 import { FakeMossAdapter } from '../moss/fake-adapter'
+import { enqueueRecoverableTranscriptRuns } from '../outbox'
 import { G3_PIPELINE_VERSION } from '../transcript/constants'
 import { cancelExternalTranscriptJobs, createTranscriptProcessor } from './transcript'
 import { cleanupTranscriptObjects } from './transcript-cleanup'
@@ -63,6 +65,17 @@ async function createRun(path: string, durationMs: number, suffix: string) {
     data: { ownerId: user.id, mediaAssetId: asset.id, pipelineVersion: G3_PIPELINE_VERSION, stage: 'PLAYBACK_READY' },
   })
   return { user, asset, run }
+}
+
+function wrapStorage(overrides: Partial<MultipartStorageProvider>) {
+  return new Proxy(storage, {
+    get(target, property) {
+      const override = overrides[property as keyof MultipartStorageProvider]
+      if (override) return typeof override === 'function' ? override.bind(overrides) : override
+      const value = target[property as keyof MinioStorageProvider]
+      return typeof value === 'function' ? value.bind(target) : value
+    },
+  }) as MultipartStorageProvider
 }
 
 describe('G3 real media pipeline with deterministic Fake MOSS', () => {
@@ -130,7 +143,9 @@ describe('G3 real media pipeline with deterministic Fake MOSS', () => {
     await processTranscript({ mediaAssetId: asset.id, processingRunId: run.id })
     const chunks = await database.processingChunk.findMany({ where: { processingRunId: run.id }, orderBy: { chunkIndex: 'asc' } })
     expect(chunks).toHaveLength(2)
-    moss.succeed(chunks[0].externalJobId!, { language: 'en', words: [{ text: 'First.', startMs: 500, endMs: 1_000 }] })
+    moss.succeed(chunks[0].externalJobId!, { language: 'en', words: [
+      { text: 'First.', startMs: 500, endMs: 1_000 }, { text: 'Still.', startMs: 58_000, endMs: 59_000 },
+    ] })
     moss.fail(chunks[1].externalJobId!, 'forced_chunk_failure')
     await database.processingChunk.updateMany({ where: { processingRunId: run.id }, data: { nextPollAt: new Date(0) } })
 
@@ -138,6 +153,29 @@ describe('G3 real media pipeline with deterministic Fake MOSS', () => {
     expect(await database.processingRun.findUniqueOrThrow({ where: { id: run.id } })).toMatchObject({ status: 'FAILED' })
     expect(await database.transcriptVersion.count({ where: { mediaAssetId: asset.id, status: 'ACTIVE' } })).toBe(0)
     expect(await database.privateLesson.count({ where: { mediaAssetId: asset.id } })).toBe(0)
+
+    await database.$transaction([
+      database.processingChunk.update({
+        where: { id: chunks[1].id },
+        data: {
+          status: 'QUEUED', externalJobId: null, errorCode: null, failedAt: null,
+          externalUpdatedAt: null, externalCancelledAt: null, submittedAt: null,
+        },
+      }),
+      database.processingRun.update({
+        where: { id: run.id },
+        data: { status: 'QUEUED', errorCode: null, failedAt: null, leaseOwner: null, leaseExpiresAt: null },
+      }),
+    ])
+    await expect(processTranscript({ mediaAssetId: asset.id, processingRunId: run.id })).resolves.toMatchObject({ waiting: true })
+    const retried = await database.processingChunk.findUniqueOrThrow({ where: { id: chunks[1].id } })
+    expect(retried.externalJobId).toBe(chunks[1].externalJobId)
+    expect(moss.submissions).toBe(3)
+    expect(await database.processingChunk.findUniqueOrThrow({ where: { id: chunks[0].id } })).toMatchObject({ status: 'SUCCEEDED' })
+    moss.succeed(retried.externalJobId!, { language: 'en', words: [{ text: 'Recovered.', startMs: 2_500, endMs: 3_500 }] })
+    await database.processingChunk.update({ where: { id: retried.id }, data: { nextPollAt: new Date(0) } })
+    await expect(processTranscript({ mediaAssetId: asset.id, processingRunId: run.id })).resolves.toMatchObject({ completed: true })
+    expect(await database.transcriptVersion.count({ where: { mediaAssetId: asset.id, status: 'ACTIVE' } })).toBe(1)
   }, 120_000)
 
   it('persists cancellation fencing and idempotently cancels the external MOSS job', async () => {
@@ -159,6 +197,11 @@ describe('G3 real media pipeline with deterministic Fake MOSS', () => {
     await expect(cancelExternalTranscriptJobs(database, moss, {
       mediaAssetId: asset.id, processingRunId: run.id,
     })).resolves.toMatchObject({ cancelled: 0 })
+    await database.mediaObject.updateMany({
+      where: { mediaAssetId: asset.id, kind: { in: ['NORMALIZED_AUDIO', 'AUDIO_CHUNK'] } },
+      data: { createdAt: new Date(Date.now() - 25 * 60 * 60_000) },
+    })
+    await expect(cleanupTranscriptObjects(database, storage)).resolves.toMatchObject({ cleaned: 2, failed: 0 })
     await expect(processTranscript({ mediaAssetId: asset.id, processingRunId: run.id })).resolves.toEqual({ skipped: true })
   }, 120_000)
 
@@ -187,5 +230,248 @@ describe('G3 real media pipeline with deterministic Fake MOSS', () => {
     expect(await database.mediaObject.count({
       where: { mediaAssetId: asset.id, kind: { in: ['NORMALIZED_AUDIO', 'AUDIO_CHUNK'] }, purgedAt: { not: null } },
     })).toBe(2)
+  }, 120_000)
+
+  it('persists and cancels a MOSS job when cancellation commits while submit is in flight', async () => {
+    const { asset, run } = await createRun(shortPath, 30_000, '5')
+    const delegate = new FakeMossAdapter()
+    const racingMoss: MossAdapter = {
+      submit: async (input) => {
+        const submitted = await delegate.submit(input)
+        await database.$transaction([
+          database.processingRun.update({
+            where: { id: run.id },
+            data: { status: 'CANCELLED', errorCode: 'processing_cancelled', leaseOwner: null, leaseExpiresAt: null },
+          }),
+          database.processingChunk.updateMany({
+            where: { processingRunId: run.id },
+            data: { status: 'CANCELLED', errorCode: 'processing_cancelled', leaseOwner: null, leaseExpiresAt: null },
+          }),
+        ])
+        return submitted
+      },
+      query: (externalJobId) => delegate.query(externalJobId),
+      result: (externalJobId) => delegate.result(externalJobId),
+      cancel: (externalJobId) => delegate.cancel(externalJobId),
+    }
+    const processTranscript = createTranscriptProcessor({ database, storage, moss: racingMoss, env, workerId: 'g3-worker-submit-race' })
+
+    await expect(processTranscript({ mediaAssetId: asset.id, processingRunId: run.id })).resolves.toMatchObject({ waiting: true })
+    const chunk = await database.processingChunk.findFirstOrThrow({ where: { processingRunId: run.id } })
+    expect(chunk).toMatchObject({ status: 'CANCELLED' })
+    expect(chunk.externalJobId).toBeTruthy()
+    expect(chunk.externalCancelledAt).not.toBeNull()
+    await expect(delegate.query(chunk.externalJobId!)).resolves.toMatchObject({ status: 'cancelled' })
+  }, 120_000)
+
+  it('keeps cancellation terminal when a successful MOSS result arrives concurrently', async () => {
+    const { asset, run } = await createRun(shortPath, 30_000, '11')
+    class CancelOnResultMoss extends FakeMossAdapter {
+      cancelOnResult = false
+      override async result(externalJobId: string) {
+        if (this.cancelOnResult) {
+          await database.$transaction([
+            database.processingRun.update({
+              where: { id: run.id },
+              data: { status: 'CANCELLED', errorCode: 'processing_cancelled', leaseOwner: null, leaseExpiresAt: null },
+            }),
+            database.processingChunk.updateMany({
+              where: { processingRunId: run.id },
+              data: { status: 'CANCELLED', errorCode: 'processing_cancelled', leaseOwner: null, leaseExpiresAt: null },
+            }),
+          ])
+        }
+        return super.result(externalJobId)
+      }
+    }
+    const moss = new CancelOnResultMoss()
+    const processTranscript = createTranscriptProcessor({ database, storage, moss, env, workerId: 'g3-worker-complete-cancel-race' })
+    await processTranscript({ mediaAssetId: asset.id, processingRunId: run.id })
+    const chunk = await database.processingChunk.findFirstOrThrow({ where: { processingRunId: run.id } })
+    moss.succeed(chunk.externalJobId!, { language: 'en', words: [{ text: 'Too late.', startMs: 500, endMs: 1_500 }] })
+    moss.cancelOnResult = true
+    await database.processingChunk.update({ where: { id: chunk.id }, data: { nextPollAt: new Date(0) } })
+
+    await expect(processTranscript({ mediaAssetId: asset.id, processingRunId: run.id }))
+      .resolves.toMatchObject({ skipped: true, leaseLost: true })
+    expect(await database.processingRun.findUniqueOrThrow({ where: { id: run.id } })).toMatchObject({ status: 'CANCELLED' })
+    expect(await database.processingChunk.findUniqueOrThrow({ where: { id: chunk.id } })).toMatchObject({ status: 'CANCELLED' })
+    expect(await database.transcriptVersion.count({ where: { mediaAssetId: asset.id } })).toBe(0)
+    expect(await database.mediaObject.count({ where: { mediaAssetId: asset.id, kind: 'ASR_RAW' } })).toBe(0)
+  }, 120_000)
+
+  it('fences a stale result worker, lets a replacement take over, and preserves the chunk model provenance', async () => {
+    const { asset, run } = await createRun(shortPath, 30_000, '6')
+    class LeaseLosingMoss extends FakeMossAdapter {
+      loseLease = false
+      override async result(externalJobId: string) {
+        if (this.loseLease) {
+          await database.$transaction([
+            database.processingRun.update({
+              where: { id: run.id },
+              data: { leaseOwner: 'replacement-pending', leaseExpiresAt: new Date(Date.now() + 60_000) },
+            }),
+            database.processingChunk.updateMany({
+              where: { processingRunId: run.id },
+              data: { leaseExpiresAt: new Date(0) },
+            }),
+          ])
+        }
+        return super.result(externalJobId)
+      }
+    }
+    const moss = new LeaseLosingMoss()
+    const firstWorker = createTranscriptProcessor({ database, storage, moss, env, workerId: 'g3-worker-stale' })
+    await firstWorker({ mediaAssetId: asset.id, processingRunId: run.id })
+    const chunk = await database.processingChunk.findFirstOrThrow({ where: { processingRunId: run.id } })
+    moss.succeed(chunk.externalJobId!, { language: 'en', words: [
+      { text: 'Lease', startMs: 500, endMs: 900 }, { text: 'safe.', startMs: 1_000, endMs: 1_500 },
+    ] })
+    await database.processingChunk.update({ where: { id: chunk.id }, data: { nextPollAt: new Date(0) } })
+    moss.loseLease = true
+
+    await expect(firstWorker({ mediaAssetId: asset.id, processingRunId: run.id }))
+      .resolves.toMatchObject({ skipped: true, leaseLost: true })
+    expect(await database.processingChunk.findUniqueOrThrow({ where: { id: chunk.id } })).toMatchObject({ status: 'PROCESSING' })
+    expect(await database.mediaObject.count({ where: { mediaAssetId: asset.id, kind: 'ASR_RAW' } })).toBe(0)
+
+    moss.loseLease = false
+    await database.processingRun.update({
+      where: { id: run.id }, data: { leaseOwner: null, leaseExpiresAt: null },
+    })
+    const replacementEnv = { ...env, MOSS_MODEL_VERSION: 'future-deployment-model' } as ServerEnv
+    const replacement = createTranscriptProcessor({ database, storage, moss, env: replacementEnv, workerId: 'g3-worker-replacement' })
+    await expect(replacement({ mediaAssetId: asset.id, processingRunId: run.id })).resolves.toMatchObject({ completed: true })
+    const transcript = await database.transcriptVersion.findFirstOrThrow({ where: { mediaAssetId: asset.id, status: 'ACTIVE' } })
+    expect(transcript.modelVersion).toBe(env.MOSS_MODEL_VERSION)
+  }, 120_000)
+
+  it('resumes a database-reserved object after upload response loss without creating a second identity', async () => {
+    const { asset, run } = await createRun(shortPath, 30_000, '7')
+    const moss = new FakeMossAdapter()
+    let normalizedUploads = 0
+    let loseFirstResponse = true
+    const responseLosingStorage = wrapStorage({
+      uploadFile: async (objectKey, filePath, contentType) => {
+        const uploaded = await storage.uploadFile(objectKey, filePath, contentType)
+        if (objectKey.endsWith('/normalized.wav')) {
+          normalizedUploads += 1
+          if (loseFirstResponse) {
+            loseFirstResponse = false
+            throw new Error('simulated_upload_response_loss')
+          }
+        }
+        return uploaded
+      },
+    })
+    const firstWorker = createTranscriptProcessor({ database, storage: responseLosingStorage, moss, env, workerId: 'g3-worker-object-gap-a' })
+    await expect(firstWorker({ mediaAssetId: asset.id, processingRunId: run.id })).rejects.toThrow('simulated_upload_response_loss')
+    const pending = await database.mediaObject.findFirstOrThrow({ where: { mediaAssetId: asset.id, kind: 'NORMALIZED_AUDIO' } })
+    expect(pending).toMatchObject({ versionId: null })
+    expect(pending.sizeBytes > 0n).toBe(true)
+    expect((pending.metadata as { uploadState?: string }).uploadState).toBe('PENDING')
+
+    const replacement = createTranscriptProcessor({ database, storage: responseLosingStorage, moss, env, workerId: 'g3-worker-object-gap-b' })
+    await expect(replacement({ mediaAssetId: asset.id, processingRunId: run.id })).resolves.toMatchObject({ waiting: true })
+    const finalized = await database.mediaObject.findMany({ where: { mediaAssetId: asset.id, kind: 'NORMALIZED_AUDIO' } })
+    expect(finalized).toHaveLength(1)
+    expect(finalized[0].versionId).not.toBeNull()
+    expect((finalized[0].metadata as { uploadState?: string }).uploadState).toBe('READY')
+    expect(normalizedUploads).toBe(1)
+  }, 120_000)
+
+  it('rejects a corrupted immutable ASR object without publishing any transcript', async () => {
+    const { asset, run } = await createRun(shortPath, 30_000, '10')
+    const moss = new FakeMossAdapter()
+    const firstWorker = createTranscriptProcessor({ database, storage, moss, env, workerId: 'g3-worker-checksum-a' })
+    await firstWorker({ mediaAssetId: asset.id, processingRunId: run.id })
+    const chunk = await database.processingChunk.findFirstOrThrow({ where: { processingRunId: run.id } })
+    moss.succeed(chunk.externalJobId!, { language: 'en', words: [
+      { text: 'Checksum', startMs: 500, endMs: 1_000 }, { text: 'guard.', startMs: 1_100, endMs: 1_500 },
+    ] })
+    await database.processingChunk.update({ where: { id: chunk.id }, data: { nextPollAt: new Date(0) } })
+    const corruptingStorage = wrapStorage({
+      downloadFile: async (objectKey, filePath, versionId) => {
+        await storage.downloadFile(objectKey, filePath, versionId)
+        if (objectKey.includes('/asr/')) await writeFile(filePath, 'corrupted-asr')
+      },
+    })
+    const verifier = createTranscriptProcessor({ database, storage: corruptingStorage, moss, env, workerId: 'g3-worker-checksum-b' })
+
+    await expect(verifier({ mediaAssetId: asset.id, processingRunId: run.id }))
+      .resolves.toMatchObject({ failed: true, errorCode: 'transcript_incomplete' })
+    expect(await database.transcriptVersion.count({ where: { mediaAssetId: asset.id, status: 'ACTIVE' } })).toBe(0)
+    expect(await database.processingRun.findUniqueOrThrow({ where: { id: run.id } }))
+      .toMatchObject({ status: 'FAILED', errorCode: 'transcript_incomplete' })
+  }, 120_000)
+
+  it('rolls back a failed publish transaction and leaves the previous ACTIVE transcript bound', async () => {
+    const { user, asset, run } = await createRun(shortPath, 30_000, '8')
+    const legacyRun = await database.processingRun.create({
+      data: {
+        ownerId: user.id, mediaAssetId: asset.id, pipelineVersion: 'legacy-transcript-v1',
+        status: 'SUCCEEDED', stage: 'TRANSCRIPT_READY', completedAt: new Date(),
+      },
+    })
+    const legacy = await database.transcriptVersion.create({
+      data: {
+        mediaAssetId: asset.id, processingRunId: legacyRun.id, version: 1, status: 'ACTIVE',
+        pipelineVersion: 'legacy-transcript-v1', modelVersion: 'legacy-model', durationMs: 30_000,
+        cueCount: 1, publishedAt: new Date(),
+        cues: { create: { order: 0, startMs: 500, endMs: 1_500, text: 'Previous transcript.', words: [] } },
+      },
+    })
+    await database.privateLesson.create({
+      data: {
+        ownerId: user.id, mediaAssetId: asset.id, transcriptVersionId: legacy.id,
+        title: asset.title, status: 'PROCESSING',
+      },
+    })
+    const moss = new FakeMossAdapter()
+    const processTranscript = createTranscriptProcessor({ database, storage, moss, env, workerId: 'g3-worker-publish-rollback' })
+    await processTranscript({ mediaAssetId: asset.id, processingRunId: run.id })
+    const chunk = await database.processingChunk.findFirstOrThrow({ where: { processingRunId: run.id } })
+    moss.succeed(chunk.externalJobId!, { language: 'en', words: [
+      { text: 'Replacement', startMs: 500, endMs: 1_000 }, { text: 'transcript.', startMs: 1_100, endMs: 1_600 },
+    ] })
+    await database.processingChunk.update({ where: { id: chunk.id }, data: { nextPollAt: new Date(0) } })
+    await database.$executeRawUnsafe(`
+      CREATE OR REPLACE FUNCTION echoflow_test_fail_g3_publish() RETURNS trigger AS $$
+      BEGIN
+        IF NEW.status = 'SUCCEEDED' AND NEW."pipelineVersion" = '${G3_PIPELINE_VERSION}' THEN
+          RAISE EXCEPTION 'forced publish rollback';
+        END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql
+    `)
+    await database.$executeRawUnsafe(`
+      CREATE TRIGGER echoflow_test_fail_g3_publish
+      BEFORE UPDATE ON "ProcessingRun"
+      FOR EACH ROW EXECUTE FUNCTION echoflow_test_fail_g3_publish()
+    `)
+    try {
+      await expect(processTranscript({ mediaAssetId: asset.id, processingRunId: run.id })).rejects.toThrow()
+    } finally {
+      await database.$executeRawUnsafe('DROP TRIGGER IF EXISTS echoflow_test_fail_g3_publish ON "ProcessingRun"')
+      await database.$executeRawUnsafe('DROP FUNCTION IF EXISTS echoflow_test_fail_g3_publish()')
+    }
+    expect(await database.transcriptVersion.findFirstOrThrow({ where: { mediaAssetId: asset.id, status: 'ACTIVE' } }))
+      .toMatchObject({ id: legacy.id, modelVersion: 'legacy-model' })
+    expect(await database.privateLesson.findUniqueOrThrow({ where: { mediaAssetId: asset.id } }))
+      .toMatchObject({ transcriptVersionId: legacy.id })
+    expect(await database.transcriptVersion.count({ where: { mediaAssetId: asset.id } })).toBe(1)
+  }, 120_000)
+
+  it('rebuilds a recoverable transcript queue entry from PostgreSQL after queue loss', async () => {
+    const { asset, run } = await createRun(shortPath, 30_000, '9')
+    await database.processingRun.update({
+      where: { id: run.id }, data: { status: 'PROCESSING', leaseOwner: 'dead-worker', leaseExpiresAt: new Date(0) },
+    })
+    const add = vi.fn(async () => undefined)
+    await expect(enqueueRecoverableTranscriptRuns(database, { add } as never)).resolves.toEqual({ enqueued: 1 })
+    expect(add).toHaveBeenCalledWith('media.transcript_process', {
+      mediaAssetId: asset.id, processingRunId: run.id,
+    }, expect.objectContaining({ attempts: 1 }))
   }, 120_000)
 })

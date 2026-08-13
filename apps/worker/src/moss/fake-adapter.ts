@@ -10,7 +10,15 @@ export class FakeMossAdapter implements MossAdapter {
 
   async submit(input: MossSubmitInput) {
     const existingId = this.byKey.get(input.idempotencyKey)
-    if (existingId) return this.jobs.get(existingId)!
+    if (existingId) {
+      const existing = this.jobs.get(existingId)!
+      if (!['failed', 'cancelled'].includes(existing.status)) return existing
+      const retried = { ...existing, status: 'queued' as const, errorCode: null }
+      this.jobs.set(existingId, retried)
+      this.results.delete(existingId)
+      this.submissions += 1
+      return retried
+    }
     const externalJobId = `fake-${randomUUID()}`
     const job: MossJob = { externalJobId, idempotencyKey: input.idempotencyKey, status: 'queued', errorCode: null }
     this.jobs.set(externalJobId, job)

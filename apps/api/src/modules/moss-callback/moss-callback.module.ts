@@ -45,22 +45,12 @@ export class MossCallbackController {
     const body = MossCallbackSchema.parse(input)
 
     return this.database.$transaction(async (transaction) => {
-      const existingEvent = await transaction.mossCallbackReceipt.findUnique({ where: { eventId: verified.eventId } })
-      if (existingEvent) {
-        if (existingEvent.nonce !== verified.nonce || existingEvent.payloadHash !== verified.payloadHash) {
-          throw new ApiException(409, 'moss_callback_invalid', 'MOSS callback event identity conflicts')
-        }
-        return { accepted: true, duplicate: true }
-      }
-      const existingNonce = await transaction.mossCallbackReceipt.findUnique({ where: { nonce: verified.nonce } })
-      if (existingNonce) throw new ApiException(409, 'moss_callback_invalid', 'MOSS callback nonce was already used')
-
       const chunk = await transaction.processingChunk.findFirst({
         where: { externalJobId: body.externalJobId, idempotencyKey: body.idempotencyKey },
         include: { processingRun: { select: { id: true, mediaAssetId: true, status: true } } },
       })
-      await transaction.mossCallbackReceipt.create({
-        data: {
+      const inserted = await transaction.mossCallbackReceipt.createMany({
+        data: [{
           eventId: verified.eventId,
           nonce: verified.nonce,
           processingChunkId: chunk?.id,
@@ -70,8 +60,21 @@ export class MossCallbackController {
           externalStatus: body.status,
           occurredAt: new Date(body.occurredAt),
           processedAt: new Date(),
-        },
+        }],
+        skipDuplicates: true,
       })
+      if (inserted.count === 0) {
+        const [existingEvent, existingNonce] = await Promise.all([
+          transaction.mossCallbackReceipt.findUnique({ where: { eventId: verified.eventId } }),
+          transaction.mossCallbackReceipt.findUnique({ where: { nonce: verified.nonce } }),
+        ])
+        if (existingEvent?.nonce === verified.nonce && existingEvent.payloadHash === verified.payloadHash) {
+          return { accepted: true, duplicate: true }
+        }
+        if (existingEvent) throw new ApiException(409, 'moss_callback_invalid', 'MOSS callback event identity conflicts')
+        if (existingNonce) throw new ApiException(409, 'moss_callback_invalid', 'MOSS callback nonce was already used')
+        throw new ApiException(409, 'moss_callback_invalid', 'MOSS callback identity conflicts')
+      }
       if (!chunk || ['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(chunk.status)
         || ['FAILED', 'CANCELLED'].includes(chunk.processingRun.status)) {
         return { accepted: true, duplicate: false }

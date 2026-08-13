@@ -36,6 +36,7 @@
 - EchoFlow 内部冻结为 `submit/query/result/cancel` 四个逻辑操作，具体 MOSS HTTP 路由与字段只存在于 Adapter；业务层不得散落供应方协议；
 - submit 使用稳定幂等键：`sourceObjectVersion + pipelineVersion + stage + chunkIndex + modelVersion`；
 - 每个外部任务的 `externalJobId` 必须在提交被接受后立即持久化；响应丢失时先按幂等键查询，不能盲目重复计费；
+- 对已经进入失败/取消终态、但允许用户重试的分片，Adapter 必须把同一幂等身份映射为供应方的“重开/重试”操作；不得把旧终态 Job 直接当成本轮新提交，也不得改变 EchoFlow 的稳定幂等键；
 - 优先由 MOSS 通过短期签名 URL 拉取音频分片；若实际 MOSS 只能 multipart 接收，Adapter 每次重试必须重新打开流，且仍不得泄露永久对象存储凭据；
 - 回调为主、延迟轮询为兜底；429、408、5xx、网络中断与超时属于可重试，认证、契约错误和确定性坏结果属于终止失败；
 - `waiting_review`、`partial` 或仅有分段文本均不等于成功；成功结果必须含完整英文文本和逐词时间戳；

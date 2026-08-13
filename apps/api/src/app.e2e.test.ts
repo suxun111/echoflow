@@ -706,7 +706,12 @@ describe('EchoFlow real PostgreSQL, auth, upload and owner boundary', () => {
         .send(raw)
     }
 
-    await sendCallback('callback-event-1234').expect(201, { accepted: true, duplicate: false })
+    const concurrentCallbacks = await Promise.all([
+      sendCallback('callback-event-1234'),
+      sendCallback('callback-event-1234'),
+    ])
+    expect(concurrentCallbacks.map((response) => response.status)).toEqual([201, 201])
+    expect(concurrentCallbacks.map((response) => response.body.duplicate).sort()).toEqual([false, true])
     await sendCallback('callback-event-1234').expect(201, { accepted: true, duplicate: true })
     expect(await database.mossCallbackReceipt.count()).toBe(1)
     expect(await database.outboxEvent.count({ where: { eventType: 'moss.callback_received' } })).toBe(1)
@@ -774,7 +779,8 @@ describe('EchoFlow real PostgreSQL, auth, upload and owner boundary', () => {
       data: {
         processingRunId: failedRun.id, chunkIndex: 0, startMs: 0, endMs: 30_000, status: 'FAILED',
         idempotencyKey: 'g3:' + 'b'.repeat(64), modelVersion: 'fake-moss', inputObjectKey: 'redacted.wav',
-        errorCode: 'moss_timeout', failedAt: new Date(),
+        externalJobId: 'moss-retry-terminal-job', submittedAt: new Date(), externalUpdatedAt: new Date(),
+        externalCancelledAt: new Date(), errorCode: 'moss_timeout', failedAt: new Date(),
       },
     })
     await database.mediaObject.create({ data: {
@@ -788,7 +794,10 @@ describe('EchoFlow real PostgreSQL, auth, upload and owner boundary', () => {
     await retry().expect(201, { accepted: true, processingRunId: failedRun.id, duplicate: false })
     await retry().expect(201, { accepted: true, processingRunId: failedRun.id, duplicate: true })
     expect(await database.processingRun.findUniqueOrThrow({ where: { id: failedRun.id } })).toMatchObject({ status: 'QUEUED', stage: 'TRANSCRIBING' })
-    expect(await database.processingChunk.findUniqueOrThrow({ where: { id: failedChunk.id } })).toMatchObject({ status: 'QUEUED', errorCode: null })
+    expect(await database.processingChunk.findUniqueOrThrow({ where: { id: failedChunk.id } })).toMatchObject({
+      status: 'QUEUED', errorCode: null, externalJobId: null, submittedAt: null,
+      externalUpdatedAt: null, externalCancelledAt: null,
+    })
     expect(await database.outboxEvent.count({ where: { eventType: 'media.transcript_retry_requested' } })).toBe(1)
     await request(app.getHttpServer())
       .post(`/api/v1/media-assets/${failedAsset.id}/transcript/retry`)

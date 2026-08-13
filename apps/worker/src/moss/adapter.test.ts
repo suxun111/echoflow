@@ -28,6 +28,15 @@ describe('G3 MOSS adapter', () => {
     expect(moss.submissions).toBe(1)
   })
 
+  it('reopens only a terminal failed job while preserving its stable identity', async () => {
+    const moss = new FakeMossAdapter()
+    const first = await moss.submit(input)
+    moss.fail(first.externalJobId, 'temporary_failure')
+    const retried = await moss.submit(input)
+    expect(retried).toMatchObject({ externalJobId: first.externalJobId, status: 'queued', errorCode: null })
+    expect(moss.submissions).toBe(2)
+  })
+
   it('checks an existing job before POST and does not expose storage credentials', async () => {
     const fetcher = vi.fn(async (url: string | URL, init?: RequestInit) => {
       expect(init?.headers).not.toHaveProperty('x-minio-secret')
@@ -39,6 +48,22 @@ describe('G3 MOSS adapter', () => {
     const adapter = new HttpMossAdapter({ env, fetchImpl: fetcher, sleep: async () => undefined })
     await expect(adapter.submit(input)).resolves.toMatchObject({ externalJobId: 'moss-existing' })
     expect(fetcher).toHaveBeenCalledTimes(1)
+  })
+
+  it('maps a terminal provider job to a stable-identity retry request', async () => {
+    const fetcher = vi.fn(async (url: string | URL, init?: RequestInit) => {
+      if (String(url).includes('by-idempotency-key')) return new Response(JSON.stringify({
+        externalJobId: 'moss-terminal', idempotencyKey: input.idempotencyKey, status: 'failed', errorCode: 'temporary',
+      }))
+      expect(String(url)).toContain('/api/jobs/moss-terminal/retry')
+      expect(init?.method).toBe('POST')
+      return new Response(JSON.stringify({
+        externalJobId: 'moss-terminal', idempotencyKey: input.idempotencyKey, status: 'queued', errorCode: null,
+      }))
+    })
+    const adapter = new HttpMossAdapter({ env, fetchImpl: fetcher, sleep: async () => undefined })
+    await expect(adapter.submit(input)).resolves.toMatchObject({ externalJobId: 'moss-terminal', status: 'queued' })
+    expect(fetcher).toHaveBeenCalledTimes(2)
   })
 
   it('rechecks idempotency after a lost POST response before retrying', async () => {

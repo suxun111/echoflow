@@ -11,7 +11,10 @@ const asset: MediaAssetView = {
 }
 
 describe('G2 signed playback recovery', () => {
-  afterEach(() => cleanup())
+  afterEach(() => {
+    cleanup()
+    window.sessionStorage.clear()
+  })
 
   it('refreshes an expired playback URL once and restores the previous currentTime', async () => {
     let signed = 0
@@ -98,5 +101,35 @@ describe('G2 signed playback recovery', () => {
     await waitFor(() => expect(api.fetchJson).toHaveBeenCalledWith(
       `/media-assets/${failed.id}/transcript/retry`, expect.objectContaining({ method: 'POST' }),
     ))
+  })
+
+  it('reuses the same retry identity when the first response is lost', async () => {
+    const failed = {
+      ...asset,
+      transcriptProcessing: {
+        status: 'failed' as const, stage: 'transcribing' as const,
+        completedChunks: 0, totalChunks: 1, errorCode: 'moss_unavailable', updatedAt: new Date().toISOString(),
+      },
+    }
+    const retryKeys: string[] = []
+    let attempts = 0
+    const api = { fetchJson: vi.fn(async (path: string, options?: RequestInit) => {
+      if (path === '/media-assets') return { items: [failed] }
+      if (path.endsWith('/transcript/retry')) {
+        retryKeys.push(new Headers(options?.headers).get('idempotency-key')!)
+        attempts += 1
+        if (attempts === 1) throw new Error('response lost')
+        return { accepted: true }
+      }
+      throw new Error(`unexpected ${path}`)
+    }) }
+    render(<MyVideosPage api={api as never} search="" onUpload={vi.fn()}/>)
+    const retry = await screen.findByRole('button', { name: '重试字幕' })
+    fireEvent.click(retry)
+    await screen.findByText('response lost')
+    fireEvent.click(retry)
+    await waitFor(() => expect(retryKeys).toHaveLength(2))
+    expect(retryKeys[0]).toMatch(/^web-/)
+    expect(retryKeys[1]).toBe(retryKeys[0])
   })
 })
