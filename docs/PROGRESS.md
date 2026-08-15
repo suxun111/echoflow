@@ -109,7 +109,7 @@ G1 契约、数据库、身份和安全
 - 用户已确认开始“MOSS 与完整字幕原子发布”，实施分支为 `codex/g3-moss-transcript-20260813`；
 - [G3 任务合同](G3-TASK-CONTRACT.md) 冻结了音频规范化、长音频分片、MOSS Adapter、HMAC 回调、回调/轮询恢复、逐词时间戳、合并校验和唯一 ACTIVE 原子发布；
 - 历史 hardening/f24e/0b51 只提取错误分类、恢复和原子发布测试意图，不整体合并；
-- 本地实现代码锚点 `805b93f` 已完成 Adapter、Fake MOSS、真实 FFmpeg 音频处理、持久 Run/Chunk、回调/轮询、恢复、精确对象版本清理、唯一 ACTIVE 原子发布，以及 G2 播放状态与 G3 字幕状态的展示隔离；
-- 当前锚点全仓 lint、148 个测试、四应用生产构建、Prisma validate 和 Compose config 通过；浏览器已复验真实 Multipart 上传、Worker 处理、签名原片播放和 MOSS 未启用时的诚实“等待字幕任务”状态；4 个会自生成样本的 G2 长媒体回归测试因未设置 `RUN_G2_LONG_MEDIA=true` 而跳过，G3 真实 MOSS 矩阵尚未执行；独立 Reviewer 未发现 P0/P1，详见 [G3 本地验证证据](G3-LOCAL-VERIFICATION-EVIDENCE.md)；
+- 本地实现代码锚点 `1e5ff7b` 已完成 Adapter、Fake MOSS、真实 FFmpeg 音频处理、持久 Run/Chunk、回调/轮询、恢复、精确对象版本清理、唯一 ACTIVE 原子发布，以及 G2 媒体诊断与 G3 字幕状态的查询和展示隔离；
+- 当前锚点全仓 lint、150 个测试、四应用生产构建、Prisma validate 和 Compose config 通过；浏览器已复验真实 Multipart 上传、Worker 处理、签名原片播放、MOSS 未启用时的诚实“等待字幕任务”状态，以及 MPEG-4 Part 2 视频被 Worker 拒绝后明确显示 H.264/AAC 重传指引；4 个会自生成样本的 G2 长媒体回归测试因未设置 `RUN_G2_LONG_MEDIA=true` 而跳过，G3 真实 MOSS 矩阵尚未执行；独立 Reviewer 未发现 P0/P1，详见 [G3 本地验证证据](G3-LOCAL-VERIFICATION-EVIDENCE.md)；
 - Fake MOSS 用于确定性故障矩阵，不能代替真实 MOSS；真实 endpoint、认证、供应方协议和 30 秒及 5/30/60/120 分钟样本未验证，G3 保持实施中而不关闭；
 - G4 的逐句播放器、录音回听和进度恢复以及 G5 生产发布继续冻结。

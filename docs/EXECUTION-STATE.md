@@ -16,7 +16,7 @@
 | fresh-clone 修复 | `0e3c912`，已 fast-forward 至 master；来源分支为 `codex/g0-fresh-clone-topology-20260811` |
 | G1 实施分支 | `codex/g1-contract-database-auth-20260812`；最终代码锚点 `4bfaaba` |
 | G2 实施分支 | `codex/g2-long-video-upload-playback-20260812`；最终代码验收锚点 `d08f6c6` |
-| G3 实施分支 | `codex/g3-moss-transcript-20260813`；基线 `master@0c3e2ee`；本地代码验收锚点 `805b93f` |
+| G3 实施分支 | `codex/g3-moss-transcript-20260813`；基线 `master@0c3e2ee`；本地代码验收锚点 `1e5ff7b` |
 | WIP | G3“MOSS 与完整字幕原子发布”仍是唯一核心纵向闭环；当前等待真实 MOSS 协议与样本矩阵 |
 | 产品功能开发 | G2 已通过退出门；G3 实施中，G4–G5 继续冻结 |
 | Remote | `origin = https://github.com/suxun111/echoflow.git`；Private；外部恢复验证通过 |
@@ -99,8 +99,8 @@
 - 最终代码验收锚点为 `d08f6c6`，独立 Reviewer 结论为无 P0/P1；
 - 验证证据已提交为 `3514a4e` 并 fast-forward 至唯一 trunk，8 项退出条件全部成立；
 - 用户已确认开始 G3；[G3 任务合同](G3-TASK-CONTRACT.md) 冻结为当前实施与验收边界；
-- 本地 Adapter、Fake MOSS、音频分片、回调/轮询、恢复、清理与原子发布候选核心实现收口于 `8139081`；`805b93f` 又修正了 G2 播放 Run 被 Web 误显示成“字幕已完成”的状态混淆，两次独立 Reviewer 均未发现 P0/P1；
-- [G3 本地验证证据](G3-LOCAL-VERIFICATION-EVIDENCE.md)记录了 148 个通过测试，以及真实 PostgreSQL/Redis/MinIO/FFmpeg、构建、静态门禁和浏览器真实上传/播放复验；另有 4 个会自生成样本的 G2 长媒体回归测试因未设置 `RUN_G2_LONG_MEDIA=true` 而跳过，G3 真实 MOSS 矩阵尚未执行；
+- 本地 Adapter、Fake MOSS、音频分片、回调/轮询、恢复、清理与原子发布候选核心实现收口于 `8139081`；`805b93f` 修正 G2 播放 Run 被误显示成“字幕已完成”，`1e5ff7b` 又把 G2 媒体诊断与 G3 字幕进度拆为独立事实，两轮增量独立 Reviewer 均未发现 P0/P1；
+- [G3 本地验证证据](G3-LOCAL-VERIFICATION-EVIDENCE.md)记录了 150 个通过测试，以及真实 PostgreSQL/Redis/MinIO/FFmpeg、构建、静态门禁和浏览器真实上传/播放/不支持编码失败复验；另有 4 个会自生成样本的 G2 长媒体回归测试因未设置 `RUN_G2_LONG_MEDIA=true` 而跳过，G3 真实 MOSS 矩阵尚未执行；
 - 真实 MOSS endpoint、认证、供应方字段/回调协议和 30 秒及 5/30/60/120 分钟真实样本矩阵仍未验证，因此 G3 不关闭；
 - G4 播放器、录音与进度以及 G5 生产发布继续冻结。
 
