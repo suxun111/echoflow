@@ -65,7 +65,7 @@
 
 - `GET /api/v1/media-assets`、`GET /api/v1/media-assets/:mediaAssetId`：返回 owner 的媒体状态和真实字幕阶段/分片计数；
 - `POST /api/v1/media-assets/:mediaAssetId/playback-url`：为 PLAYABLE 原片/播放对象签发短期 Range GET URL；
-- `GET /api/v1/media-assets/:mediaAssetId/transcript`：只返回当前 ACTIVE 的完整英文逐词字幕；BUILDING、失败或缺片统一不可见；
+- `GET /api/v1/media-assets/:mediaAssetId/transcript`：只返回当前 ACTIVE 的完整英文 Cue 字幕；`words` 在 Provider 只有分段时间时为空数组，有真实逐词证据时返回逐词时间；BUILDING、失败或缺片统一不可见；
 - `POST /api/v1/media-assets/:mediaAssetId/transcript/retry`：以 `Idempotency-Key` 重试持久化的可重试失败；临时音频过期、确定性坏结果或活动任务会被拒绝；
 - `POST /api/v1/media-assets/:mediaAssetId/transcript/cancel`：以 `Idempotency-Key` 建立数据库取消 fencing，并通过 Outbox 让 Worker 持久重试外部 MOSS cancel。
 

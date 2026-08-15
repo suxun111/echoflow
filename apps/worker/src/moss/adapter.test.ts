@@ -55,7 +55,7 @@ describe('G3 MOSS adapter', () => {
       if (String(url).includes('by-idempotency-key')) return new Response(JSON.stringify({
         externalJobId: 'moss-terminal', idempotencyKey: input.idempotencyKey, status: 'failed', errorCode: 'temporary',
       }))
-      expect(String(url)).toContain('/api/jobs/moss-terminal/retry')
+      expect(String(url)).toContain('/api/provider/v1/jobs/moss-terminal/retry')
       expect(init?.method).toBe('POST')
       return new Response(JSON.stringify({
         externalJobId: 'moss-terminal', idempotencyKey: input.idempotencyKey, status: 'queued', errorCode: null,
@@ -99,5 +99,24 @@ describe('G3 MOSS adapter', () => {
       sleep: async () => undefined,
     })
     await expect(malformed.result('job')).rejects.toMatchObject({ code: 'moss_invalid_response', retryable: false })
+  })
+
+  it('accepts provider-native English segment timings without inventing words', async () => {
+    const adapter = new HttpMossAdapter({
+      env, fetchImpl: async () => new Response(JSON.stringify({
+        language: 'en', segments: [{ text: 'Hello from MOSS.', startMs: 250, endMs: 1_750, speaker: 'S01' }],
+      })), sleep: async () => undefined,
+    })
+    await expect(adapter.result('job')).resolves.toEqual({
+      language: 'en', segments: [{ text: 'Hello from MOSS.', startMs: 250, endMs: 1_750, speaker: 'S01' }],
+    })
+  })
+
+  it('rejects an English result with neither word nor segment timings', async () => {
+    const adapter = new HttpMossAdapter({
+      env, fetchImpl: async () => new Response(JSON.stringify({ language: 'en', segments: [] })),
+      sleep: async () => undefined,
+    })
+    await expect(adapter.result('job')).rejects.toMatchObject({ code: 'moss_invalid_response', retryable: false })
   })
 })

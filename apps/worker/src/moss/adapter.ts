@@ -21,7 +21,8 @@ export type MossJob = {
 }
 
 export type MossWord = { text: string; startMs: number; endMs: number }
-export type MossResult = { language: 'en'; words: MossWord[] }
+export type MossSegment = { text: string; startMs: number; endMs: number; speaker?: string }
+export type MossResult = { language: 'en'; segments?: MossSegment[]; words?: MossWord[] }
 
 export interface MossAdapter {
   findByIdempotencyKey(idempotencyKey: string): Promise<MossJob | null>
@@ -79,16 +80,39 @@ function parseJob(value: unknown): MossJob {
 }
 
 function parseResult(value: unknown): MossResult {
-  if (!isRecord(value) || value.language !== 'en' || !Array.isArray(value.words)) {
-    throw new MossError('moss_invalid_response', 'MOSS result must contain English word timings', false)
+  if (!isRecord(value) || value.language !== 'en') {
+    throw new MossError('moss_invalid_response', 'MOSS result must contain an English transcript', false)
   }
-  const words = value.words.map((item) => {
+  if (value.words !== undefined && !Array.isArray(value.words)) {
+    throw new MossError('moss_invalid_response', 'MOSS words must be an array', false)
+  }
+  if (value.segments !== undefined && !Array.isArray(value.segments)) {
+    throw new MossError('moss_invalid_response', 'MOSS segments must be an array', false)
+  }
+  const words = (value.words ?? []).map((item) => {
     if (!isRecord(item) || typeof item.text !== 'string' || !Number.isInteger(item.startMs) || !Number.isInteger(item.endMs)) {
       throw new MossError('moss_invalid_response', 'MOSS returned an invalid word timing', false)
     }
     return { text: item.text.trim(), startMs: item.startMs as number, endMs: item.endMs as number }
   })
-  return { language: 'en', words }
+  const segments = (value.segments ?? []).map((item) => {
+    if (!isRecord(item) || typeof item.text !== 'string' || !Number.isInteger(item.startMs) || !Number.isInteger(item.endMs)
+      || (item.speaker !== undefined && typeof item.speaker !== 'string')) {
+      throw new MossError('moss_invalid_response', 'MOSS returned an invalid segment timing', false)
+    }
+    return {
+      text: item.text.trim(), startMs: item.startMs as number, endMs: item.endMs as number,
+      ...(typeof item.speaker === 'string' && item.speaker.trim() ? { speaker: item.speaker.trim() } : {}),
+    }
+  })
+  if (words.length === 0 && segments.length === 0) {
+    throw new MossError('moss_invalid_response', 'MOSS result must contain word or segment timings', false)
+  }
+  return {
+    language: 'en',
+    ...(segments.length ? { segments } : {}),
+    ...(words.length ? { words } : {}),
+  }
 }
 
 function defaultSleep(milliseconds: number) {
@@ -164,7 +188,7 @@ export class HttpMossAdapter implements MossAdapter {
 
   async findByIdempotencyKey(idempotencyKey: string): Promise<MossJob | null> {
     try {
-      const value = await this.requestOnce(`/api/jobs/by-idempotency-key/${encodeURIComponent(idempotencyKey)}`, {
+      const value = await this.requestOnce(`/api/provider/v1/jobs/by-idempotency-key/${encodeURIComponent(idempotencyKey)}`, {
         method: 'GET', headers: this.headers(),
       })
       return parseJob(value)
@@ -179,8 +203,8 @@ export class HttpMossAdapter implements MossAdapter {
       const existing = await this.findByIdempotencyKey(input.idempotencyKey)
       if (existing && !['failed', 'cancelled'].includes(existing.status)) return existing
       const path = existing
-        ? `/api/jobs/${encodeURIComponent(existing.externalJobId)}/retry`
-        : '/api/jobs'
+        ? `/api/provider/v1/jobs/${encodeURIComponent(existing.externalJobId)}/retry`
+        : '/api/provider/v1/jobs'
       const value = await this.requestOnce(path, {
         method: 'POST', headers: this.headers(true), body: JSON.stringify(input),
       })
@@ -193,20 +217,20 @@ export class HttpMossAdapter implements MossAdapter {
   }
 
   query(externalJobId: string) {
-    return this.retry(async () => parseJob(await this.requestOnce(`/api/jobs/${encodeURIComponent(externalJobId)}`, {
+    return this.retry(async () => parseJob(await this.requestOnce(`/api/provider/v1/jobs/${encodeURIComponent(externalJobId)}`, {
       method: 'GET', headers: this.headers(),
     })))
   }
 
   result(externalJobId: string) {
-    return this.retry(async () => parseResult(await this.requestOnce(`/api/jobs/${encodeURIComponent(externalJobId)}/result`, {
+    return this.retry(async () => parseResult(await this.requestOnce(`/api/provider/v1/jobs/${encodeURIComponent(externalJobId)}/result`, {
       method: 'GET', headers: this.headers(),
     })))
   }
 
   async cancel(externalJobId: string) {
     await this.retry(async () => {
-      await this.requestOnce(`/api/jobs/${encodeURIComponent(externalJobId)}/cancel`, {
+      await this.requestOnce(`/api/provider/v1/jobs/${encodeURIComponent(externalJobId)}/cancel`, {
         method: 'POST', headers: this.headers(true), body: '{}',
       })
     })

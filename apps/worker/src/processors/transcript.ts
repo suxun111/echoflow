@@ -11,7 +11,7 @@ import type { MultipartStorageProvider, StoredObject } from '@online-learning/st
 import { MossError, type MossAdapter, type MossResult } from '../moss/adapter'
 import { parseSilenceCenters, planAudioChunks } from '../transcript/chunks'
 import { G3_PIPELINE_VERSION } from '../transcript/constants'
-import { mergeChunkResults, segmentTranscript, TranscriptValidationError } from '../transcript/merge'
+import { buildTranscript, TranscriptValidationError } from '../transcript/merge'
 
 const execFileAsync = promisify(execFile)
 const noProxyEnvironment = {
@@ -532,7 +532,7 @@ export function createTranscriptProcessor(options: TranscriptProcessorOptions) {
         },
         data: {
           status: 'SUCCEEDED', resultObjectKey: object.objectKey, resultVersionId: object.versionId,
-          resultChecksum, wordCount: result.words.length, completedAt: now(), nextPollAt: null,
+          resultChecksum, wordCount: result.words?.length ?? 0, completedAt: now(), nextPollAt: null,
           leaseOwner: null, leaseExpiresAt: null, errorCode: null, errorDetail: Prisma.DbNull,
         },
       })
@@ -836,7 +836,7 @@ export function createTranscriptProcessor(options: TranscriptProcessorOptions) {
       if (await checksum(bytes) !== chunk.resultChecksum) throw new TranscriptValidationError('transcript_incomplete', 'ASR result checksum mismatch')
       results.push({ chunkIndex: chunk.chunkIndex, startMs: chunk.startMs, endMs: chunk.endMs, result: JSON.parse(bytes.toString('utf8')) as MossResult })
     }
-    const words = mergeChunkResults(results, run.mediaAsset.durationMs)
+    const transcriptResult = buildTranscript(results, run.mediaAsset.durationMs)
     const stage = await options.database.processingRun.findUniqueOrThrow({
       where: { id: run.id }, select: { stage: true },
     })
@@ -852,7 +852,7 @@ export function createTranscriptProcessor(options: TranscriptProcessorOptions) {
     } else if (!['CUE_SEGMENTING', 'VALIDATING'].includes(stage.stage)) {
       throw new TranscriptLeaseLostError('transcript_segment_stage_lost')
     }
-    const cues = segmentTranscript(words)
+    const cues = transcriptResult.cues
     if (stage.stage !== 'VALIDATING') {
       const validating = await options.database.processingRun.updateMany({
         where: {
@@ -919,7 +919,7 @@ export function createTranscriptProcessor(options: TranscriptProcessorOptions) {
       })
       if (completed.count !== 1) throw new TranscriptLeaseLostError('transcript_publish_fence_lost')
     }, { maxWait: 10_000, timeout: 60_000 })
-    return { completed: true, cueCount: cues.length, wordCount: words.length }
+    return { completed: true, cueCount: cues.length, wordCount: transcriptResult.wordCount }
   }
 
   return async (job: TranscriptJob) => leaseOwnerContext.run(

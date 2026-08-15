@@ -177,7 +177,7 @@ export const TranscriptCueViewSchema = z.object({
   startMs: z.number().int().nonnegative(),
   endMs: z.number().int().positive(),
   text: z.string().trim().min(1),
-  words: z.array(TranscriptWordSchema).min(1),
+  words: z.array(TranscriptWordSchema),
 }).strict()
 
 export const ActiveTranscriptViewSchema = z.object({

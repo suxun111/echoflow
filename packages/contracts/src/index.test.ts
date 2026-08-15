@@ -3,6 +3,7 @@ import {
   AccessSessionSchema, ApiErrorSchema, CreateUploadSchema, DEFAULT_UPLOAD_PART_SIZE_BYTES,
   MAX_UPLOAD_BYTES, MediaAssetStatusSchema, OtpRequestSchema, ProcessingStageSchema,
   ProcessingStatusSchema, SignUploadPartsSchema, TranscriptStatusSchema,
+  TranscriptCueViewSchema,
 } from './index'
 
 describe('G1 contracts', () => {
@@ -45,5 +46,12 @@ describe('G1 contracts', () => {
     expect(() => CreateUploadSchema.parse({ ...valid, sizeBytes: MAX_UPLOAD_BYTES + 1 })).toThrow()
     expect(() => CreateUploadSchema.parse({ ...valid, fileName: 'podcast.mov' })).toThrow()
     expect(() => SignUploadPartsSchema.parse({ partNumbers: [1, 1] })).toThrow()
+  })
+
+  it('allows a segment-timed cue without fabricated word timings', () => {
+    expect(TranscriptCueViewSchema.parse({
+      id: crypto.randomUUID(), order: 0, startMs: 250, endMs: 1_750,
+      text: 'Hello from MOSS.', words: [],
+    }).words).toEqual([])
   })
 })

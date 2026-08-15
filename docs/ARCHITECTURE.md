@@ -49,7 +49,7 @@ flowchart LR
 
 ## 异步处理
 
-`apps/worker` 通过 BullMQ 消费 `echoflow-media` 队列，PostgreSQL Run/Chunk/Outbox 是事实源。G2 Worker 真实探测 MP4/H.264/AAC 并按需做无损 fast-start；G3 Worker 从 0ms 提取 16 kHz 单声道音频、在静音附近切片、通过 Adapter 调用 MOSS，以 Callback 为主且轮询兜底，保存不可变原始结果，合并逐词时间戳并在单事务中发布唯一 ACTIVE 字幕。
+`apps/worker` 通过 BullMQ 消费 `echoflow-media` 队列，PostgreSQL Run/Chunk/Outbox 是事实源。G2 Worker 真实探测 MP4/H.264/AAC 并按需做无损 fast-start；G3 Worker 从 0ms 提取 16 kHz 单声道音频、在静音附近切片、通过 Adapter 调用 MOSS，以 Callback 为主且轮询兜底，保存不可变原始结果，合并真实分段时间（逐词时间可选）并在单事务中发布唯一 ACTIVE 字幕。
 
 Run/Chunk 采用 lease/CAS 与最终 fencing；旧 Worker 在提交分片、拉取结果和发布前都必须重新证明当前租约。外部任务 ID、幂等键、回调时间、取消状态和对象版本均持久化，部署时模型配置变化不会改写既有 Chunk 的模型来源。
 
