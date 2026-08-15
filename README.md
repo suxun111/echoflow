@@ -10,7 +10,7 @@ EchoFlow V1 是一个私人英语长视频影子学习工具。目标链路是�
 → 逐句循环、录音回听和进度恢复
 ```
 
-当前仓库已完成 G1 安全数据基线、G2 私人长视频上传/原片播放闭环，以及 G3 的本地转写流水线候选实现；真实 MOSS、真实长视频字幕验收、影子练习与生产发布仍未接通。不要根据 Fake MOSS、页面、接口或 Worker 文件存在就判断 V1 已整体完成。
+当前仓库已完成 G1 安全数据基线、G2 私人长视频上传/原片播放闭环，以及 G3 的本地转写流水线和 MOSS Provider Gateway 候选实现；真实模型推理、真实长视频字幕验收、影子练习与生产发布仍未接通。不要根据 Fake MOSS、页面、接口、Worker 或 Gateway 文件存在就判断 V1 已整体完成。
 
 ## 当前执行基线
 
@@ -21,7 +21,7 @@ EchoFlow V1 是一个私人英语长视频影子学习工具。目标链路是�
 - G1 契约、数据库、身份和安全已通过；最终代码验证锚点为 `4bfaaba`；
 - 外部私有仓库：`https://github.com/suxun111/echoflow.git`；
 - G2 长视频上传与可播放资产已关闭；最终代码验收锚点为 `d08f6c6`，证据提交为 `3514a4e`；
-- G3 本地实现代码锚点为 `1e5ff7b`（核心流水线 `8139081`，状态隔离 `805b93f`，媒体诊断拆分 `1e5ff7b`），独立 Reviewer 未发现 P0/P1；[本地验证证据](docs/G3-LOCAL-VERIFICATION-EVIDENCE.md) 不等于真实 MOSS 验收，G3 仍保持打开；G4–G5 继续冻结；
+- G3 EchoFlow 代码锚点为 `ca3e3ad`，配套 MOSS Provider Gateway 锚点为 `cdf6eb3`；segment-first 契约、跨分片失败关闭、稳定幂等身份、重启恢复和持久 TTL 均通过本地自动化与独立 Reviewer，但 [本地验证证据](docs/G3-LOCAL-VERIFICATION-EVIDENCE.md) 不等于真实模型验收，G3 仍保持打开；G4–G5 继续冻结；
 - recovery、hardening、daily-goal 分支不得整体盲合。
 
 开始开发或审查前依次阅读：
