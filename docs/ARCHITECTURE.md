@@ -2,7 +2,7 @@
 
 > 状态说明：本文区分 G1/G2 已关闭能力、G3 当前实施能力和仍冻结的 G4–G5。目标架构和已确认边界见 [EchoFlow V1 PRD](EchoFlow-V1-PRD.md)，动态进度见 [Execution State](EXECUTION-STATE.md)。
 
-更新时间：2026-08-13
+更新时间：2026-08-15
 
 ## 总览
 
@@ -63,7 +63,7 @@ Run/Chunk 采用 lease/CAS 与最终 fencing；旧 Worker 在提交分片、拉�
 
 ## 验证状态
 
-代码锚点 `8139081` 已通过全仓 TypeScript 检查、146 个自动化测试、真实 PostgreSQL/MinIO/Redis/FFmpeg 集成和生产构建；其中 Fake MOSS 覆盖成功、单片失败后定向恢复、提交/完成与取消竞态、租约 generation 接管、对象写入响应丢失、checksum 损坏、发布事务回滚、队列重建和清理，独立 Reviewer 未发现 P0/P1。G3 尚缺真实 MOSS endpoint/协议和 30 秒及 5/30/60/120 分钟真实矩阵，因此当前验证不能关闭 G3。完整边界见 [G3 本地验证证据](G3-LOCAL-VERIFICATION-EVIDENCE.md)。
+代码锚点 `805b93f` 已通过全仓 TypeScript 检查、148 个自动化测试、真实 PostgreSQL/MinIO/Redis/FFmpeg 集成、生产构建和浏览器上传/播放复验；其中 Fake MOSS 覆盖成功、单片失败后定向恢复、提交/完成与取消竞态、租约 generation 接管、对象写入响应丢失、checksum 损坏、发布事务回滚、队列重建和清理。API 只把 `g3-transcript-v1` Run 暴露为字幕进度，Web 只有在持久阶段为 `transcript_ready` 时才显示“字幕已完成”；独立 Reviewer 未发现 P0/P1。G3 尚缺真实 MOSS endpoint/协议和 30 秒及 5/30/60/120 分钟真实矩阵，因此当前验证不能关闭 G3。完整边界见 [G3 本地验证证据](G3-LOCAL-VERIFICATION-EVIDENCE.md)。
 
 常用全仓门禁：
 

@@ -21,7 +21,7 @@ EchoFlow V1 是一个私人英语长视频影子学习工具。目标链路是�
 - G1 契约、数据库、身份和安全已通过；最终代码验证锚点为 `4bfaaba`；
 - 外部私有仓库：`https://github.com/suxun111/echoflow.git`；
 - G2 长视频上传与可播放资产已关闭；最终代码验收锚点为 `d08f6c6`，证据提交为 `3514a4e`；
-- G3 本地实现代码锚点为 `8139081`，独立 Reviewer 未发现 P0/P1；[本地验证证据](docs/G3-LOCAL-VERIFICATION-EVIDENCE.md) 不等于真实 MOSS 验收，G3 仍保持打开；G4–G5 继续冻结；
+- G3 本地实现代码锚点为 `805b93f`（核心流水线 `8139081`，浏览器验收状态修正 `805b93f`），独立 Reviewer 未发现 P0/P1；[本地验证证据](docs/G3-LOCAL-VERIFICATION-EVIDENCE.md) 不等于真实 MOSS 验收，G3 仍保持打开；G4–G5 继续冻结；
 - recovery、hardening、daily-goal 分支不得整体盲合。
 
 开始开发或审查前依次阅读：
