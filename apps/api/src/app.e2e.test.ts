@@ -139,6 +139,38 @@ describe('EchoFlow real PostgreSQL, auth, upload and owner boundary', () => {
     expect(malformedId.body.requestId).toBeTruthy()
   })
 
+  it('does not expose a G2 playback run as transcript processing state', async () => {
+    const owner = await login('+8613800000099')
+    const asset = await database.mediaAsset.create({
+      data: {
+        ownerId: owner.user.id, title: 'Playback only', originalName: 'playback-only.mp4',
+        status: 'PLAYABLE', durationMs: 6_000,
+      },
+    })
+    await database.processingRun.create({
+      data: {
+        ownerId: owner.user.id, mediaAssetId: asset.id, pipelineVersion: 'g2-playback-v1',
+        status: 'SUCCEEDED', stage: 'PLAYBACK_READY', completedAt: new Date(),
+      },
+    })
+
+    const listed = await request(app.getHttpServer())
+      .get('/api/v1/media-assets')
+      .set('authorization', `Bearer ${owner.accessToken}`)
+      .expect(200)
+    const listedAsset = listed.body.items.find((item: { id: string }) => item.id === asset.id)
+    expect(listedAsset).toBeTruthy()
+    expect(listedAsset.processingStage).toBeNull()
+    expect(listedAsset.transcriptProcessing).toBeUndefined()
+
+    const detail = await request(app.getHttpServer())
+      .get(`/api/v1/media-assets/${asset.id}`)
+      .set('authorization', `Bearer ${owner.accessToken}`)
+      .expect(200)
+    expect(detail.body.processingStage).toBeNull()
+    expect(detail.body.transcriptProcessing).toBeUndefined()
+  })
+
   it('persists OTP/session state and rotates an HttpOnly refresh cookie after app restart', async () => {
     const session = await login('+8613800000001')
     expect(session.rawCookie).toContain('HttpOnly')

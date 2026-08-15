@@ -31,7 +31,9 @@ function statusCopy(upload: UploadSessionView, asset?: MediaAssetView) {
   if (upload.status === 'cancelled') return ['已取消', '原始分片已撤销']
   if (upload.status === 'expired') return ['已过期', '7 天续传窗口已经结束']
   if (upload.status === 'failed' || asset?.status === 'failed') return ['不支持播放', asset?.errorCode === 'media_format_unsupported' ? '请重新上传 MP4 / H.264 / AAC 文件' : '对象或媒体检查失败，请重新上传原文件']
-  if (asset?.status === 'playable' && asset.transcriptProcessing?.status === 'succeeded') return ['字幕已完成', '完整英文逐词字幕已经准备好']
+  if (asset?.status === 'playable'
+    && asset.transcriptProcessing?.status === 'succeeded'
+    && asset.transcriptProcessing.stage === 'transcript_ready') return ['字幕已完成', '完整英文逐词字幕已经准备好']
   if (asset?.status === 'playable' && asset.transcriptProcessing?.status === 'failed') return ['字幕失败，原片可播', asset.transcriptProcessing.errorCode ?? '字幕任务失败，请在“我的视频”中重试']
   if (asset?.status === 'playable' && ['queued', 'processing', 'validating'].includes(asset.transcriptProcessing?.status ?? '')) {
     const state = asset.transcriptProcessing!

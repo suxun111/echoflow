@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import type { UploadSessionView } from '@online-learning/contracts'
+import type { MediaAssetView, UploadSessionView } from '@online-learning/contracts'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { UploadsPage } from './UploadsPage'
 
@@ -162,5 +162,36 @@ describe('G2 upload page recovery behavior', () => {
     expect(completeAttempts).toBe(1)
     expect(mocks.uploadMultipart).not.toHaveBeenCalled()
     expect(await screen.findByText('上传已完整保存，正在检查视频是否可直接播放。')).toBeInTheDocument()
+  })
+
+  it('never presents a playback-ready run as a completed transcript', async () => {
+    const now = new Date().toISOString()
+    const completed = {
+      ...session, status: 'completed' as const, uploadedBytes: 11,
+      completedAt: now, mediaAssetId: crypto.randomUUID(),
+    }
+    const playbackAsset: MediaAssetView = {
+      id: completed.mediaAssetId, uploadSessionId: session.id, title: session.title,
+      originalName: session.originalName, status: 'playable', durationMs: 6_000,
+      processingStage: 'playback_ready', errorCode: null,
+      transcriptProcessing: {
+        status: 'succeeded', stage: 'playback_ready', completedChunks: 0, totalChunks: 0,
+        errorCode: null, updatedAt: now,
+      },
+      createdAt: now, updatedAt: now,
+    }
+    const api = {
+      fetchJson: vi.fn(async (path: string) => {
+        if (path === '/uploads') return { items: [completed] }
+        if (path === '/media-assets') return { items: [playbackAsset] }
+        throw new Error(`unexpected ${path}`)
+      }),
+    }
+
+    render(<UploadsPage api={api as never}/>)
+
+    expect(await screen.findByText('可以播放')).toBeInTheDocument()
+    expect(screen.getByText('原始清晰度视频已经准备好，等待字幕任务')).toBeInTheDocument()
+    expect(screen.queryByText('字幕已完成')).not.toBeInTheDocument()
   })
 })

@@ -58,6 +58,7 @@ export class MediaAssetsController {
 
   private processingInclude() {
     return {
+      where: { pipelineVersion: 'g3-transcript-v1' },
       orderBy: { createdAt: 'desc' }, take: 1,
       select: {
         status: true, stage: true, errorCode: true, updatedAt: true,
