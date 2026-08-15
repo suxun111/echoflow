@@ -194,4 +194,30 @@ describe('G2 upload page recovery behavior', () => {
     expect(screen.getByText('原始清晰度视频已经准备好，等待字幕任务')).toBeInTheDocument()
     expect(screen.queryByText('字幕已完成')).not.toBeInTheDocument()
   })
+
+  it('shows the actionable codec guidance for a G2 media format failure', async () => {
+    const now = new Date().toISOString()
+    const completed = {
+      ...session, status: 'completed' as const, uploadedBytes: 11,
+      completedAt: now, mediaAssetId: crypto.randomUUID(),
+    }
+    const failedAsset: MediaAssetView = {
+      id: completed.mediaAssetId, uploadSessionId: session.id, title: session.title,
+      originalName: session.originalName, status: 'failed', durationMs: null,
+      processingStage: 'probing', errorCode: 'media_format_unsupported',
+      createdAt: now, updatedAt: now,
+    }
+    const api = {
+      fetchJson: vi.fn(async (path: string) => {
+        if (path === '/uploads') return { items: [completed] }
+        if (path === '/media-assets') return { items: [failedAsset] }
+        throw new Error(`unexpected ${path}`)
+      }),
+    }
+
+    render(<UploadsPage api={api as never}/>)
+
+    expect(await screen.findByText('不支持播放')).toBeInTheDocument()
+    expect(screen.getByText('请重新上传 MP4 / H.264 / AAC 文件')).toBeInTheDocument()
+  })
 })

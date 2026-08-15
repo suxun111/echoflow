@@ -16,6 +16,7 @@ function toView(asset: {
   status: string
   durationMs: number | null
   processingRuns?: Array<{
+    pipelineVersion: string
     status: string
     stage: string
     errorCode: string | null
@@ -25,7 +26,8 @@ function toView(asset: {
   createdAt: Date
   updatedAt: Date
 }): MediaAssetView {
-  const run = asset.processingRuns?.[0]
+  const playbackRun = asset.processingRuns?.find((run) => run.pipelineVersion === 'g2-playback-v1')
+  const transcriptRun = asset.processingRuns?.find((run) => run.pipelineVersion === 'g3-transcript-v1')
   return {
     id: asset.id,
     uploadSessionId: asset.uploadSessionId,
@@ -33,15 +35,15 @@ function toView(asset: {
     originalName: asset.originalName,
     status: asset.status.toLowerCase() as MediaAssetView['status'],
     durationMs: asset.durationMs,
-    processingStage: run?.stage.toLowerCase() as MediaAssetView['processingStage'] ?? null,
-    errorCode: run?.errorCode ?? null,
-    transcriptProcessing: run ? {
-      status: run.status.toLowerCase() as NonNullable<MediaAssetView['transcriptProcessing']>['status'],
-      stage: run.stage.toLowerCase() as NonNullable<MediaAssetView['transcriptProcessing']>['stage'],
-      completedChunks: run.chunks.filter((chunk) => chunk.status === 'SUCCEEDED').length,
-      totalChunks: run.chunks.length,
-      errorCode: run.errorCode,
-      updatedAt: run.updatedAt.toISOString(),
+    processingStage: playbackRun?.stage.toLowerCase() as MediaAssetView['processingStage'] ?? null,
+    errorCode: playbackRun?.errorCode ?? null,
+    transcriptProcessing: transcriptRun ? {
+      status: transcriptRun.status.toLowerCase() as NonNullable<MediaAssetView['transcriptProcessing']>['status'],
+      stage: transcriptRun.stage.toLowerCase() as NonNullable<MediaAssetView['transcriptProcessing']>['stage'],
+      completedChunks: transcriptRun.chunks.filter((chunk) => chunk.status === 'SUCCEEDED').length,
+      totalChunks: transcriptRun.chunks.length,
+      errorCode: transcriptRun.errorCode,
+      updatedAt: transcriptRun.updatedAt.toISOString(),
     } : undefined,
     createdAt: asset.createdAt.toISOString(),
     updatedAt: asset.updatedAt.toISOString(),
@@ -58,10 +60,10 @@ export class MediaAssetsController {
 
   private processingInclude() {
     return {
-      where: { pipelineVersion: 'g3-transcript-v1' },
-      orderBy: { createdAt: 'desc' }, take: 1,
+      where: { pipelineVersion: { in: ['g2-playback-v1', 'g3-transcript-v1'] as string[] } },
+      orderBy: { createdAt: 'desc' },
       select: {
-        status: true, stage: true, errorCode: true, updatedAt: true,
+        pipelineVersion: true, status: true, stage: true, errorCode: true, updatedAt: true,
         chunks: { select: { status: true } },
       },
     } as const

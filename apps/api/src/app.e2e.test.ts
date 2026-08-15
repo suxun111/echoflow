@@ -139,7 +139,7 @@ describe('EchoFlow real PostgreSQL, auth, upload and owner boundary', () => {
     expect(malformedId.body.requestId).toBeTruthy()
   })
 
-  it('does not expose a G2 playback run as transcript processing state', async () => {
+  it('separates G2 media state from G3 transcript state when both runs exist', async () => {
     const owner = await login('+8613800000099')
     const asset = await database.mediaAsset.create({
       data: {
@@ -154,20 +154,69 @@ describe('EchoFlow real PostgreSQL, auth, upload and owner boundary', () => {
       },
     })
 
+    const transcriptRun = await database.processingRun.create({
+      data: {
+        ownerId: owner.user.id, mediaAssetId: asset.id, pipelineVersion: 'g3-transcript-v1',
+        status: 'PROCESSING', stage: 'TRANSCRIBING',
+      },
+    })
+    await database.processingChunk.createMany({ data: [
+      {
+        processingRunId: transcriptRun.id, chunkIndex: 0, startMs: 0, endMs: 3_000,
+        status: 'SUCCEEDED', idempotencyKey: `test:${transcriptRun.id}:0`, modelVersion: 'moss-test',
+        inputObjectKey: `test/${transcriptRun.id}/0.wav`,
+      },
+      {
+        processingRunId: transcriptRun.id, chunkIndex: 1, startMs: 3_000, endMs: 6_000,
+        status: 'PROCESSING', idempotencyKey: `test:${transcriptRun.id}:1`, modelVersion: 'moss-test',
+        inputObjectKey: `test/${transcriptRun.id}/1.wav`,
+      },
+    ] })
+
     const listed = await request(app.getHttpServer())
       .get('/api/v1/media-assets')
       .set('authorization', `Bearer ${owner.accessToken}`)
       .expect(200)
     const listedAsset = listed.body.items.find((item: { id: string }) => item.id === asset.id)
     expect(listedAsset).toBeTruthy()
-    expect(listedAsset.processingStage).toBeNull()
-    expect(listedAsset.transcriptProcessing).toBeUndefined()
+    expect(listedAsset.processingStage).toBe('playback_ready')
+    expect(listedAsset.errorCode).toBeNull()
+    expect(listedAsset.transcriptProcessing).toMatchObject({
+      status: 'processing', stage: 'transcribing', completedChunks: 1, totalChunks: 2, errorCode: null,
+    })
 
     const detail = await request(app.getHttpServer())
       .get(`/api/v1/media-assets/${asset.id}`)
       .set('authorization', `Bearer ${owner.accessToken}`)
       .expect(200)
-    expect(detail.body.processingStage).toBeNull()
+    expect(detail.body.processingStage).toBe('playback_ready')
+    expect(detail.body.errorCode).toBeNull()
+    expect(detail.body.transcriptProcessing).toMatchObject({
+      status: 'processing', stage: 'transcribing', completedChunks: 1, totalChunks: 2, errorCode: null,
+    })
+  })
+
+  it('preserves a G2 media format failure without inventing transcript state', async () => {
+    const owner = await login('+8613800000098')
+    const asset = await database.mediaAsset.create({
+      data: {
+        ownerId: owner.user.id, title: 'Unsupported media', originalName: 'unsupported.mp4', status: 'FAILED',
+      },
+    })
+    await database.processingRun.create({
+      data: {
+        ownerId: owner.user.id, mediaAssetId: asset.id, pipelineVersion: 'g2-playback-v1',
+        status: 'FAILED', stage: 'PROBING', errorCode: 'media_format_unsupported', failedAt: new Date(),
+      },
+    })
+
+    const detail = await request(app.getHttpServer())
+      .get(`/api/v1/media-assets/${asset.id}`)
+      .set('authorization', `Bearer ${owner.accessToken}`)
+      .expect(200)
+    expect(detail.body).toMatchObject({
+      id: asset.id, status: 'failed', processingStage: 'probing', errorCode: 'media_format_unsupported',
+    })
     expect(detail.body.transcriptProcessing).toBeUndefined()
   })
 
