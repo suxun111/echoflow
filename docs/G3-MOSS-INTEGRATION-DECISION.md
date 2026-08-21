@@ -1,6 +1,6 @@
 # EchoFlow G3：真实 MOSS 接入差距与产品决策
 
-状态：用户已于 2026-08-15 确认采用路线 A
+状态：用户已于 2026-08-15 确认采用路线 A；2026-08-21 真实 30 秒模型/Provider 冒烟通过，G3 仍打开
 
 审计日期：2026-08-15
 
@@ -27,7 +27,7 @@ MOSS 审计锚点：`E:\33442\ai\moss\MOSS-Transcribe-Diarize@0e3d140`；Provide
 | MOSS 工作树 | `main@0e3d140`；存在 4 个用户未跟踪文件 | 审计基线明确 | 未跟踪 Docker 文件可以直接纳入版本库 |
 | 本地 Python 测试 | 导入阶段缺少 `transformers`、`torch`、`soundfile` | 本机 Python 环境尚未安装运行依赖 | 测试断言失败或代码一定错误 |
 
-本轮没有提交真实音频任务，原因是模型缓存为空；首次执行可能下载大模型并长时间占用磁盘、网络与 CPU。容器健康不能替代一次真实 30 秒样本验证。
+在该 `0e3d140` 审计轮次没有提交真实音频任务，原因是模型缓存为空；首次执行可能下载大模型并长时间占用磁盘、网络与 CPU。该历史容器健康不能替代一次真实 30 秒样本验证。
 
 ## 契约差距
 
@@ -134,8 +134,15 @@ Gateway 的最低要求（第一版路由固定为 `/api/provider/v1`）：
 - 路线 A 已落到 EchoFlow `ca3e3ad`：`segments` 必选、`words` 可选；无逐词证据时不伪造单词时间；跨片文本、时间、重复序列或 speaker 不能唯一消歧时返回 `transcript_incomplete`；
 - MOSS `cdf6eb3` 已建立 `/api/provider/v1`：Bearer、精确音频 host:port 白名单、稳定幂等身份、Attempt generation fencing、重启协调、不可变 segment 结果和持久 TTL；
 - EchoFlow 160 项测试、MOSS 52 项测试、两边编译/构建及 8002 隔离运行态通过；独立 Reviewer 对两个代码锚点均未发现 P0/P1；
-- 这只关闭了“软件合同与恢复语义”差距。真实模型缓存、设备推理、30 秒黄金样本和 5/30/60/120 分钟矩阵仍未验证。
+- 这只关闭了“软件合同与恢复语义”差距。当时真实模型缓存、设备推理、30 秒黄金样本和 5/30/60/120 分钟矩阵仍未验证。
+
+## 2026-08-21 真实 30 秒补充结果
+
+- 固定模型 `OpenMOSS-Team/MOSS-Transcribe-Diarize@e8681d68e7042738ffca8ac8212bc8fcb1131ab8` 已在本地 CUDA 12.8 / RTX 4060 Laptop GPU 上完成 BF16 推理；模型文件和权重 SHA-256 均与官方元数据核验一致；
+- 30 秒英语 WAV 的模型级 CLI 成功生成 11 个真实 segment、286 token，耗时约 13.84 秒，所有 segment 时间单调、非空且在 30 秒范围内；
+- 独立 Provider `8002` 以 Bearer、精确 `host:port` allowlist 和临时本机音频 URL 验证同一请求的稳定身份、`processing → succeeded`、不可变 `language=en` segment 结果；没有 `words`，符合路线 A，未伪造词级时间；
+- 这次验证没有启动 EchoFlow G3 API/Worker/对象存储的完整字幕发布，也没有运行长媒体、恢复故障或人工准确率矩阵。它缩小了“真实模型不可用”的外部风险，但不改变 G3 Gate 的退出条件。
 
 ## 当前 Gate 判断
 
-G3 继续保持打开，G4/G5 继续冻结。当前本机已具备可测试的 Provider 合同，但 160 个 EchoFlow 测试、52 个 MOSS 测试和未加载模型的运行态都不能证明真实 MOSS 已生成合格长视频字幕。
+G3 继续保持打开，G4/G5 继续冻结。当前本机已具备经过真实 30 秒模型/Provider 冒烟验证的合同，但它与 160 个 EchoFlow 测试、52 个 MOSS 测试都不能证明真实 MOSS 已完成合格长视频字幕、故障恢复和 EchoFlow 原子发布。

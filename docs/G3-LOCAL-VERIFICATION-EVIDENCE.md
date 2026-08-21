@@ -1,6 +1,6 @@
 # EchoFlow G3 本地实现验证证据
 
-验证日期：2026-08-16
+验证日期：2026-08-16；真实 30 秒补充验证：2026-08-21
 
 实施分支：`codex/g3-moss-transcript-20260813`
 
@@ -12,7 +12,7 @@ EchoFlow 代码验收锚点：`ca3e3ad00cdb54a5e32d1ce614db433b3c9d50e9`
 
 MOSS Provider Gateway 锚点：`cdf6eb32f12f593121b669cddf609db7f4215131`
 
-状态：本地实现候选通过；G3 Gate 保持打开
+状态：本地实现候选与真实 30 秒 MOSS 冒烟通过；G3 Gate 保持打开
 
 ## 1. 结论
 
@@ -20,7 +20,7 @@ MOSS Provider Gateway 锚点：`cdf6eb32f12f593121b669cddf609db7f4215131`
 
 本地自动化、真实 PostgreSQL/Redis/MinIO/FFmpeg 集成、生产构建和独立代码审查均通过，当前没有已知 P0/P1。
 
-这不是 G3 关闭证据。机器接口、认证和 segment-first 响应合同已经本地实现，但真实模型尚未下载、加载或推理，30 秒及 5/30/60/120 分钟真实 MOSS 样本矩阵没有执行；因此不能声称真实长视频已经由 MOSS 生成合格字幕，也不能进入 G4。
+这不是 G3 关闭证据。机器接口、认证和 segment-first 响应合同已经本地实现；2026-08-21 又以固定真实模型完成了 30 秒音频的 CLI 与隔离 Provider 冒烟。它没有调用 EchoFlow G3 API/Worker/对象存储形成完整字幕发布，也没有完成 5/30/60/120 分钟真实 MOSS 矩阵、真实故障恢复或人工准确率基准；因此不能声称真实长视频已经由 MOSS 生成合格字幕，也不能进入 G4。
 
 ## 2. 已实现并验证的边界
 
@@ -50,6 +50,8 @@ MOSS Provider Gateway 锚点：`cdf6eb32f12f593121b669cddf609db7f4215131`
 | 设置 `.env.example` 的本地 `DATABASE_URL` 后执行 `pnpm --filter @online-learning/database exec prisma validate` | 通过 | G3 schema 可由 Prisma 解析；未设置该必需变量时命令会按设计拒绝运行 |
 | `docker compose -f infrastructure/docker-compose.yml config --quiet` | 通过 | Compose 结构有效，不代表生产部署验收 |
 | `git diff --check` | 通过 | 无补丁空白错误 |
+| 固定真实 MOSS 模型级 CLI（RTX 4060 Laptop GPU、CUDA 12.8、BF16） | 30 秒英语 WAV 成功；11 个真实分段、286 token、约 13.84 秒推理、时间 0.11–29.62 秒 | 模型 revision `e8681d68e7042738ffca8ac8212bc8fcb1131ab8` 已核验；只证明模型级转写，不证明 EchoFlow 发布链 |
+| 隔离真实 Provider（`127.0.0.1:8002`） | `ready=true`；重复同一 POST 保持同一 `externalJobId`；`processing → succeeded`；结果为 11 个英文 segment、110–29620ms、单调且无越界 | 临时 Bearer 与回环 `8099` 音频服务只用于本机验证，结束后均已关闭；`words` 缺失符合 segment-first，不伪造词级时间 |
 
 测试分布：
 
@@ -94,18 +96,24 @@ Reviewer 对 `ca3e3ad` / `cdf6eb3` 的最终结论为：无 P0/P1，批准作为
 
 本次运行明确设置 `MOSS_ENABLED=false`，所以“等待字幕任务”是正确状态；它证明个人上传与原片播放的本地纵向链路，不证明 MOSS 字幕链已通过。
 
-## 6. 仍然阻塞 G3 的外部证据
+## 6. 真实 30 秒 MOSS 补充验证
+
+MOSS 代码锚点仍为 `cdf6eb32f12f593121b669cddf609db7f4215131`，本轮没有修改该仓库的已跟踪源码。模型 ID 为 `OpenMOSS-Team/MOSS-Transcribe-Diarize`，固定 revision 为 `e8681d68e7042738ffca8ac8212bc8fcb1131ab8`；20 个模型文件的大小均与官方元数据一致，权重 SHA-256 与官方元数据一致。输入为本地 16 kHz / mono / 30.000 秒英语 WAV；音频和转写正文不进入 EchoFlow 仓库。
+
+模型级 CLI 使用本地模型目录、`cuda:0`、BF16、贪心解码和 `8192` token 上限。它返回 11 个非空、时间单调且均在 `[0, 30s]` 内的真实分段，生成 286 token，未触发截断。Provider 级验证以本地临时 token 和精确 `127.0.0.1:8099` allowlist 启动独立 `8002` listener；两次相同 payload 返回同一稳定外部身份，终态为 `succeeded`，固化结果为 `language=en`、11 个整数毫秒分段、无 `words`。原生 GUI Job 的 `waiting_review` 被 Gateway 正确映射为 Provider 的 `succeeded`。
+
+独立 Reviewer 对输入/结果一致性、时间不变量、监听清场和源代码锚点复核后结论为 P0=0、P1=0。验证结束时 `8002` 和 `8099` 无监听；旧 CPU GUI `8001` 容器保持 healthy 且未重启。唯一 P2 证据缺口是没有人工参考转写，因此没有 WER/CER 等量化准确率结论。
+
+## 7. 仍然阻塞 G3 的外部证据
 
 以下任一项不能由 Fake MOSS 或测试数量替代：
 
-1. 在明确的 CPU/GPU 环境下载并校验真实 MOSS 模型，冻结模型版本与请求 `modelVersion` 的绑定；
-2. 使用真实 MOSS 完成 30 秒黄金样本；
-3. 使用真实 MOSS 完成 5/30/60/120 分钟私人 MP4 矩阵；
-4. 核对完整英文、单调且无越界的真实分段时间、分片边界、模型版本和唯一 ACTIVE 发布；若 Provider 返回逐词时间，再额外核对逐词时间；
-5. 在真实推理中演练 MOSS/Worker 重启、轮询丢失、429/503、超时、取消和恢复；
-6. 记录端到端耗时、吞吐、峰值内存、对象大小、供应方错误分类和成本依据；
-7. 对 EchoFlow 与 MOSS 最终 Commit 执行 fresh clone 的冻结安装、迁移、lint、test 和 build/启动验证；
-8. 在真实 MOSS 相关代码确定后重新执行 Reviewer 与最终 Gate 判断；
-9. 将最终验证证据提交并进入唯一 trunk。
+1. 使用真实 MOSS 完成 5/30/60/120 分钟私人 MP4 矩阵；30 秒 WAV 冒烟不能替代真实长视频和分片边界；
+2. 核对完整英文、单调且无越界的真实分段时间、分片边界、模型版本和唯一 ACTIVE 发布；若 Provider 返回逐词时间，再额外核对逐词时间；
+3. 在真实推理中演练 MOSS/Worker 重启、轮询丢失、429/503、超时、取消和恢复；
+4. 记录端到端耗时、吞吐、峰值内存、对象大小、供应方错误分类和成本依据；
+5. 对 EchoFlow 与 MOSS 最终 Commit 执行 fresh clone 的冻结安装、迁移、lint、test 和 build/启动验证；
+6. 在真实 MOSS 相关代码确定后重新执行 Reviewer 与最终 Gate 判断；
+7. 将最终验证证据提交并进入唯一 trunk。
 
 在这些证据完成前，G3 状态必须保持“实施中/等待外部验收”，不得标记为关闭，也不得以此开始 G4 集成。

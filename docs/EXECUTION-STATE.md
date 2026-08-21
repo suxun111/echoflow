@@ -1,6 +1,6 @@
 # EchoFlow Execution State
 
-更新时间：2026-08-16
+更新时间：2026-08-21
 
 此文件记录动态执行状态，不重复存放完整 PRD。长期产品决定见 [EchoFlow V1 PRD](EchoFlow-V1-PRD.md)，整体终点见 [v0.5.0-alpha.1 Goal](GOAL-v0.5.0-alpha.1.md)。
 
@@ -9,7 +9,7 @@
 | 字段 | 当前值 |
 |---|---|
 | Goal | `v0.5.0-alpha.1` |
-| Gate | `G1`、`G2` 已关闭；`G3` 本地实现候选已通过代码审查，但真实 MOSS 门禁未通过，Gate 保持打开 |
+| Gate | `G1`、`G2` 已关闭；`G3` 本地实现候选与真实 30 秒 MOSS 冒烟均已通过，但长媒体与完整纵向门禁未通过，Gate 保持打开 |
 | 唯一 trunk | `master` |
 | V1 产品代码审计源点 | `42968ad` |
 | G0 文档基线 | `d01c67e`，已 fast-forward 至 master |
@@ -18,10 +18,10 @@
 | G2 实施分支 | `codex/g2-long-video-upload-playback-20260812`；最终代码验收锚点 `d08f6c6` |
 | G3 实施分支 | `codex/g3-moss-transcript-20260813`；基线提交 `0c3e2ee`（分支创建时的 `master`）；EchoFlow 代码锚点 `ca3e3ad` |
 | MOSS Provider 分支 | `codex/echoflow-provider-gateway-20260815`；代码锚点 `cdf6eb3` |
-| WIP | G3“MOSS 与完整字幕原子发布”仍是唯一核心纵向闭环；Provider 合同已实现，当前等待真实模型与样本矩阵 |
+| WIP | G3“MOSS 与完整字幕原子发布”仍是唯一核心纵向闭环；固定真实模型已完成 30 秒 CLI/Provider 冒烟，当前等待 5/30/60/120 分钟矩阵与 EchoFlow 纵向验收 |
 | 产品功能开发 | G2 已通过退出门；G3 实施中，G4–G5 继续冻结 |
 | Remote | `origin = https://github.com/suxun111/echoflow.git`；Private；外部恢复验证通过 |
-| 下一人工边界 | 用户确认大模型下载、磁盘与算力投入后，先执行真实 30 秒黄金样本，再决定是否进入 5/30/60/120 分钟矩阵；未通过不关闭 G3 |
+| 下一人工边界 | 先为 5 分钟真实样本冻结格式、磁盘预算、人工参考稿与验收记录；通过后才按 30/60/120 分钟逐级扩展，任一档失败均不关闭 G3 |
 
 ## 2026-08-11 决策澄清
 
@@ -102,7 +102,8 @@
 - 用户已确认开始 G3；[G3 任务合同](G3-TASK-CONTRACT.md) 冻结为当前实施与验收边界；
 - EchoFlow `ca3e3ad` 已采用 segment-first 契约并接入 `/api/provider/v1`；MOSS `cdf6eb3` 已实现独立 Bearer 网关、稳定幂等身份、代际 fencing、重启协调、不可变结果与持久 TTL。独立 Reviewer 对两个工作树均未发现 P0/P1；
 - [G3 本地验证证据](G3-LOCAL-VERIFICATION-EVIDENCE.md)记录了 EchoFlow 160 个通过测试、MOSS 52 个通过测试、真实 PostgreSQL/Redis/MinIO/FFmpeg、生产构建和 8002 隔离网关运行态复验；另有 4 个会自生成样本的 G2 长媒体回归测试因未设置 `RUN_G2_LONG_MEDIA=true` 而跳过；
-- 真实模型尚未下载、加载和执行；30 秒及 5/30/60/120 分钟真实样本矩阵也未验证，因此 G3 不关闭；
+- 固定 revision 的真实 MOSS 已在 RTX 4060 Laptop GPU 上完成 30 秒英语 WAV 的 BF16 CLI 与隔离 Provider 冒烟：11 段、时间单调且无越界、同一幂等请求返回稳定外部任务身份；详细边界见 [G3 本地验证证据](G3-LOCAL-VERIFICATION-EVIDENCE.md)；
+- 本轮只证明“真实 30 秒模型 + Provider 协议”，未调用 EchoFlow G3 API/Worker/对象存储形成完整字幕发布，也未完成 5/30/60/120 分钟矩阵、真实故障恢复或人工准确率基准，因此 G3 不关闭；
 - G4 播放器、录音与进度以及 G5 生产发布继续冻结。
 
 ## G2 关闭证据
