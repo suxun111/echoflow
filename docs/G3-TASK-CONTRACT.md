@@ -35,7 +35,7 @@
 
 - EchoFlow 内部冻结为 `submit/query/result/cancel` 四个逻辑操作，具体 MOSS HTTP 路由与字段只存在于 Adapter；业务层不得散落供应方协议；
 - 当前自建 Provider Gateway 使用带版本的 `/api/provider/v1` 路由；MOSS 原有 GUI `/api/jobs` 不是 EchoFlow 供应方合同；
-- submit 使用稳定幂等键：`sourceObjectVersion + pipelineVersion + stage + chunkIndex + modelVersion`；
+- submit 使用稳定幂等键：`sourceObjectVersion + pipelineVersion + planRevision + chunkIndex + startMs + endMs + inputObjectKey + inputVersionId + inputChecksum + modelVersion`；同一输入身份重试复用同一键，不同边界或输入版本绝不复用旧 MOSS Job；
 - 每个外部任务的 `externalJobId` 必须在提交被接受后立即持久化；响应丢失时先按幂等键查询，不能盲目重复计费；
 - 对已经进入失败/取消终态、但允许用户重试的分片，Adapter 必须把同一幂等身份映射为供应方的“重开/重试”操作；不得把旧终态 Job 直接当成本轮新提交，也不得改变 EchoFlow 的稳定幂等键；
 - 优先由 MOSS 通过短期签名 URL 拉取音频分片；若实际 MOSS 只能 multipart 接收，Adapter 每次重试必须重新打开流，且仍不得泄露永久对象存储凭据；
@@ -59,6 +59,7 @@
 - 每个阶段和分片通过数据库 CAS/lease 认领，最终提交再次验证 leaseOwner、状态与取消栅栏；旧 Worker 不得覆盖或删除新 Worker 已采用的对象；
 - Redis 消息丢失、Outbox 重投、Worker 崩溃、MOSS 回调丢失和外部任务已接受但响应丢失后均可恢复；
 - 只重试失败阶段或失败分片；已持久化且校验通过的音频对象、外部 Job ID 和原始结果不得重复生成；
+- 对 `ambiguous_segment_handoff`，V1 最多允许一次自动、有界的相邻 pair 重切：原计划保持 revision 0，新 pair 作为 revision 1 overlay 持久化；旧 `ProcessingChunk`、输入对象、ASR 原始结果和外部 Job 永不覆盖或删除。候选 revision 只在完整严格合并成功时原子切换为 active；重切后仍歧义则 `transcript_incomplete`，不再猜测或继续重切；
 - 取消先持久化终态并建立 fencing，再尽力取消 MOSS 和清理临时对象；迟到回调不能复活任务；
 - 可重试失败采用有上限的指数退避与抖动；超过上限进入明确失败态并保留稳定错误码。
 
@@ -67,6 +68,7 @@
 - MOSS 原始结果先作为不可变 `ASR_RAW` 对象保存，并记录 checksum、模型版本和来源分片；
 - 必选分段结构至少包含 `text/startMs/endMs`，可选逐词结构同样包含 `text/startMs/endMs`；所有数值使用毫秒整数，不使用浮点秒作为数据库事实；
 - 分片偏移恢复后，依据重叠区文本序列与时间做确定性去重；不能只把数组首尾拼接；
+- 当相邻分段在重叠区没有唯一文本与时间交接证据时，必须失败关闭。仅该结构化诊断可触发上述一次静音重切；静音位置本身不是字幕发布证据，任何 repair 候选仍必须走完整的严格合并和原子发布；
 - 校验覆盖：每个必需分片成功、索引连续、分段文本非空、`0 ≤ startMs < endMs ≤ durationMs`、全局时间单调、Cue 不倒序、没有明显大段未覆盖；存在逐词数据时还要校验词序和词时间；
 - Provider 只有分段时间时，一个已校验的真实分段直接映射为一个 Cue，`words=[]`；只有存在真实逐词/强制对齐证据时才允许进一步切分，禁止按字符数或平均时长伪造单词边界；
 - 不生成中文翻译、说话人审核或人工字幕；
@@ -76,7 +78,7 @@
 
 ### 3.6 API 与 Web 状态
 
-- owner 可在媒体资产详情中看到真实字幕阶段、已完成分片数/总分片数、最近更新时间与稳定错误码；
+- owner 可在媒体资产详情中看到真实字幕阶段、当前有效计划的已完成分片数/总分片数、最近更新时间与稳定错误码；历史 revision 不得被重复计入或暴露；
 - 只展示由数据库事实推导的阶段和计数，不伪造模型百分比或完成时间；
 - 提供 owner-scoped 的字幕版本与 Cue 只读接口，为 G4 真实播放器准备数据；BUILDING/REJECTED 版本不可见；
 - 失败页区分“播放仍可用”和“字幕生成失败”，支持对允许重试的任务发起显式重试；
@@ -154,6 +156,7 @@ Callback body 至少携带 `externalJobId`、EchoFlow 幂等键、外部状态�
 - POST 已接受但响应丢失后复用同一外部任务；
 - callback 签名正确/错误、过期 timestamp、重复 nonce、重复事件、乱序与迟到；
 - 单片失败后仅重试该片；某必需片永久失败时不能出现 ACTIVE 字幕；
+- 相邻交接歧义时只生成一个 revision 1 的替换 pair；旧 pair 和未受影响 chunk 的身份、对象、结果、MOSS Job 均不变；repair 后仍歧义时不生成 revision 2，且没有 ACTIVE 字幕；
 - Redis 消息丢失、Outbox 重投、Worker 在抽音频/提交/合并/发布前后崩溃；
 - 多 Worker 竞争、lease 过期接管、取消与完成竞态、旧 Worker 最终 fencing；
 - 结果为空、缺分段时间、时间倒退、越界、重复重叠、缺片与损坏 checksum；存在逐词结果时还覆盖缺词时间戳；

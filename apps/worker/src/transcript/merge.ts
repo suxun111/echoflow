@@ -16,8 +16,18 @@ export type TranscriptCueDraft = {
   words: TranscriptWord[]
 }
 
+export type TranscriptRepairDiagnostic = {
+  kind: 'ambiguous_segment_handoff'
+  previousChunkIndex: number
+  nextChunkIndex: number
+}
+
 export class TranscriptValidationError extends Error {
-  constructor(readonly code: 'transcript_incomplete' | 'transcript_timing_invalid', message: string) {
+  constructor(
+    readonly code: 'transcript_incomplete' | 'transcript_timing_invalid',
+    message: string,
+    readonly repairDiagnostic?: TranscriptRepairDiagnostic,
+  ) {
     super(message)
     this.name = 'TranscriptValidationError'
   }
@@ -220,12 +230,26 @@ function mergeSegmentResults(chunks: ChunkResult[], durationMs: number): Absolut
   for (let index = 1; index < sorted.length; index += 1) {
     const previousChunk = sorted[index - 1]
     const chunk = sorted[index]
-    const reconciled = reconcileSegmentBoundary(
-      merged,
-      normalizeChunkSegments(chunk),
-      chunk.startMs,
-      previousChunk.endMs,
-    )
+    let reconciled: { previous: AbsoluteSegment[]; next: AbsoluteSegment[] }
+    try {
+      reconciled = reconcileSegmentBoundary(
+        merged,
+        normalizeChunkSegments(chunk),
+        chunk.startMs,
+        previousChunk.endMs,
+      )
+    } catch (error) {
+      if (error instanceof TranscriptValidationError
+        && error.code === 'transcript_incomplete'
+        && error.message === 'overlapped chunks have ambiguous segment text at the handoff boundary') {
+        throw new TranscriptValidationError(error.code, error.message, {
+          kind: 'ambiguous_segment_handoff',
+          previousChunkIndex: previousChunk.chunkIndex,
+          nextChunkIndex: chunk.chunkIndex,
+        })
+      }
+      throw error
+    }
     merged = [...reconciled.previous, ...reconciled.next]
   }
   validateCoverage(merged, durationMs, 'segment')

@@ -72,6 +72,23 @@ describe('G3 transcript merge and validation', () => {
     expect(transcript.cues.at(-1)).toMatchObject({ startMs: 12_000, endMs: 14_000 })
   })
 
+  it('keeps segment timestamps strict while accepting a Provider-normalized terminal boundary', () => {
+    expect(() => buildTranscript([
+      { chunkIndex: 0, startMs: 0, endMs: 306_680, result: { language: 'en', segments: [
+        { text: 'Terminal.', startMs: 0, endMs: 306_720, speaker: 'S01' },
+      ] } },
+    ], 306_680)).toThrowError(TranscriptValidationError)
+
+    const transcript = buildTranscript([
+      { chunkIndex: 0, startMs: 0, endMs: 306_680, result: { language: 'en', segments: [
+        { text: 'Terminal.', startMs: 0, endMs: 306_680, speaker: 'S01' },
+      ] } },
+    ], 306_680)
+    expect(transcript.cues).toEqual([
+      { order: 0, startMs: 0, endMs: 306_680, text: 'Terminal.', words: [] },
+    ])
+  })
+
   it('reconciles differently segmented overlap without dropping the new suffix or duplicating a cue', () => {
     const transcript = buildTranscript([
       { chunkIndex: 0, startMs: 0, endMs: 12_000, result: { language: 'en', segments: [
@@ -89,14 +106,24 @@ describe('G3 transcript merge and validation', () => {
   })
 
   it('fails closed when overlapped segment text cannot be reconciled without guessing', () => {
-    expect(() => buildTranscript([
+    const build = () => buildTranscript([
       { chunkIndex: 0, startMs: 0, endMs: 12_000, result: { language: 'en', segments: [
         { text: 'We need to learn this today.', startMs: 9_000, endMs: 11_500 },
       ] } },
       { chunkIndex: 1, startMs: 10_000, endMs: 20_000, result: { language: 'en', segments: [
         { text: 'A completely different boundary.', startMs: 0, endMs: 2_000 },
       ] } },
-    ], 20_000)).toThrow('ambiguous segment text')
+    ], 20_000)
+    expect(build).toThrow('ambiguous segment text')
+    try {
+      build()
+      throw new Error('expected strict handoff failure')
+    } catch (error) {
+      expect(error).toBeInstanceOf(TranscriptValidationError)
+      expect((error as TranscriptValidationError).repairDiagnostic).toEqual({
+        kind: 'ambiguous_segment_handoff', previousChunkIndex: 0, nextChunkIndex: 1,
+      })
+    }
   })
 
   it('does not deduplicate repeated text when the real segment times identify separate occurrences', () => {

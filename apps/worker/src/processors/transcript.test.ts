@@ -39,12 +39,14 @@ const env = {
 let directory = ''
 let shortPath = ''
 let longPath = ''
+let repairPath = ''
 
-async function generate(path: string, seconds: number) {
+async function generate(path: string, seconds: number, audioFilter?: string) {
   await execFileAsync('ffmpeg', [
     '-hide_banner', '-loglevel', 'error',
     '-f', 'lavfi', '-i', 'color=c=black:s=160x90:r=1',
     '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=16000',
+    ...(audioFilter ? ['-af', audioFilter] : []),
     '-t', String(seconds), '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '45',
     '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '24k', '-movflags', '+faststart', '-y', path,
   ], { windowsHide: true, timeout: 120_000 })
@@ -87,7 +89,12 @@ describe('G3 real media pipeline with deterministic Fake MOSS', () => {
     directory = await mkdtemp(join(tmpdir(), 'echoflow-g3-worker-test-'))
     shortPath = join(directory, 'short.mp4')
     longPath = join(directory, 'long.mp4')
-    await Promise.all([generate(shortPath, 30), generate(longPath, 80)])
+    repairPath = join(directory, 'repair.mp4')
+    await Promise.all([
+      generate(shortPath, 30),
+      generate(longPath, 80),
+      generate(repairPath, 140, "volume=0:enable='between(t,48,51)+between(t,59,61)+between(t,119,121)'"),
+    ])
     await storage.ensureBucket()
     await storage.ensureVersioning()
     await database.$connect()
@@ -107,6 +114,17 @@ describe('G3 real media pipeline with deterministic Fake MOSS', () => {
     await database.$disconnect()
     if (directory) await rm(directory, { recursive: true, force: true })
   })
+
+  function overlapSegment(
+    chunk: { startMs: number; endMs: number },
+    peer: { startMs: number; endMs: number },
+    text: string,
+  ) {
+    const startMs = Math.max(chunk.startMs, peer.startMs) + 200
+    const endMs = Math.min(chunk.endMs, peer.endMs) - 200
+    if (endMs <= startMs) throw new Error('test_chunks_do_not_overlap')
+    return { text, startMs: startMs - chunk.startMs, endMs: endMs - chunk.startMs }
+  }
 
   it('extracts from zero, persists each stage and atomically publishes one ACTIVE English transcript', async () => {
     const { asset, run } = await createRun(shortPath, 30_000, '1')
@@ -139,6 +157,171 @@ describe('G3 real media pipeline with deterministic Fake MOSS', () => {
     expect(objects.map((object) => object.kind)).toEqual(expect.arrayContaining(['ORIGINAL', 'NORMALIZED_AUDIO', 'AUDIO_CHUNK', 'ASR_RAW']))
     expect(await processTranscript({ mediaAssetId: asset.id, processingRunId: run.id })).toEqual({ skipped: true })
   }, 120_000)
+
+  it('replans only an ambiguous adjacent pair as an immutable revision overlay before publishing', async () => {
+    const { asset, run } = await createRun(repairPath, 140_000, '101')
+    const moss = new FakeMossAdapter()
+    const processTranscript = createTranscriptProcessor({ database, storage, moss, env, workerId: 'g3-worker-replan' })
+
+    await expect(processTranscript({ mediaAssetId: asset.id, processingRunId: run.id })).resolves.toMatchObject({ waiting: true })
+    const revisionZero = await database.processingChunk.findMany({
+      where: { processingRunId: run.id, planRevision: 0 }, orderBy: { chunkIndex: 'asc' },
+    })
+    expect(revisionZero).toHaveLength(3)
+    const immutableIdentity = revisionZero.map((chunk) => ({
+      id: chunk.id, planRevision: chunk.planRevision, chunkIndex: chunk.chunkIndex,
+      startMs: chunk.startMs, endMs: chunk.endMs, inputObjectKey: chunk.inputObjectKey,
+      inputVersionId: chunk.inputVersionId, inputChecksum: chunk.inputChecksum,
+      idempotencyKey: chunk.idempotencyKey, externalJobId: chunk.externalJobId, modelVersion: chunk.modelVersion,
+    }))
+    const untouchedThird = revisionZero[2]
+    await expect(database.processingChunk.update({
+      where: { id: revisionZero[0].id }, data: { startMs: revisionZero[0].startMs + 1 },
+    })).rejects.toThrow('immutable identity')
+
+    moss.succeed(revisionZero[0].externalJobId!, { language: 'en', segments: [
+      overlapSegment(revisionZero[0], revisionZero[1], 'Old boundary.'),
+    ] })
+    moss.succeed(revisionZero[1].externalJobId!, { language: 'en', segments: [
+      overlapSegment(revisionZero[1], revisionZero[0], 'Different boundary.'),
+      overlapSegment(revisionZero[1], revisionZero[2], 'Bridge.'),
+    ] })
+    moss.succeed(revisionZero[2].externalJobId!, { language: 'en', segments: [
+      overlapSegment(revisionZero[2], revisionZero[1], 'Bridge.'),
+    ] })
+    await database.processingChunk.updateMany({
+      where: { processingRunId: run.id, planRevision: 0 }, data: { nextPollAt: new Date(0) },
+    })
+
+    const repairProcessor = createTranscriptProcessor({
+      database, storage, moss, env: { ...env, MOSS_MODEL_VERSION: 'fake-moss-v2' } as ServerEnv,
+      workerId: 'g3-worker-replan-after-deploy',
+    })
+    await expect(repairProcessor({ mediaAssetId: asset.id, processingRunId: run.id }))
+      .resolves.toMatchObject({ waiting: true, replanned: true })
+    const [repairing, preservedRevisionZero, revisionOne, preservedAsr] = await Promise.all([
+      database.processingRun.findUniqueOrThrow({ where: { id: run.id } }),
+      database.processingChunk.findMany({ where: { processingRunId: run.id, planRevision: 0 }, orderBy: { chunkIndex: 'asc' } }),
+      database.processingChunk.findMany({ where: { processingRunId: run.id, planRevision: 1 }, orderBy: { chunkIndex: 'asc' } }),
+      database.mediaObject.findMany({
+        where: { mediaAssetId: asset.id, kind: 'ASR_RAW', deletedAt: null, metadata: { path: ['planRevision'], equals: 0 } },
+        orderBy: { objectKey: 'asc' }, select: { objectKey: true, versionId: true, checksumSha256: true },
+      }),
+    ])
+    expect(repairing).toMatchObject({ activePlanRevision: 0, pendingPlanRevision: 1, status: 'PROCESSING', stage: 'TRANSCRIBING' })
+    expect(preservedRevisionZero.map((chunk) => ({
+      id: chunk.id, planRevision: chunk.planRevision, chunkIndex: chunk.chunkIndex,
+      startMs: chunk.startMs, endMs: chunk.endMs, inputObjectKey: chunk.inputObjectKey,
+      inputVersionId: chunk.inputVersionId, inputChecksum: chunk.inputChecksum,
+      idempotencyKey: chunk.idempotencyKey, externalJobId: chunk.externalJobId, modelVersion: chunk.modelVersion,
+    }))).toEqual(immutableIdentity)
+    expect(revisionOne.map((chunk) => chunk.chunkIndex)).toEqual([0, 1])
+    expect(revisionOne).toHaveLength(2)
+    expect(revisionOne.map((chunk) => chunk.modelVersion)).toEqual([env.MOSS_MODEL_VERSION, env.MOSS_MODEL_VERSION])
+    expect(revisionOne[0].endMs).not.toBe(revisionZero[0].endMs)
+    expect(revisionOne[1].startMs).not.toBe(revisionZero[1].startMs)
+    expect((repairing.repairPlan as { originalBoundaryMs?: number; replacementBoundaryMs?: number } | null)?.originalBoundaryMs)
+      .not.toBe((repairing.repairPlan as { originalBoundaryMs?: number; replacementBoundaryMs?: number } | null)?.replacementBoundaryMs)
+    const immutableResults = preservedRevisionZero.map((chunk) => ({
+      id: chunk.id, externalJobId: chunk.externalJobId, resultObjectKey: chunk.resultObjectKey,
+      resultVersionId: chunk.resultVersionId, resultChecksum: chunk.resultChecksum,
+    }))
+    expect(preservedAsr).toHaveLength(3)
+    await expect(database.processingChunk.update({
+      where: { id: preservedRevisionZero[0].id }, data: { resultChecksum: 'f'.repeat(64) },
+    })).rejects.toThrow('immutable identity')
+    for (const replacement of revisionOne) {
+      const prior = revisionZero.find((chunk) => chunk.chunkIndex === replacement.chunkIndex)!
+      expect(replacement.inputVersionId).toBeTruthy()
+      expect(replacement.inputChecksum).toMatch(/^[a-f0-9]{64}$/)
+      expect(replacement.inputObjectKey).not.toBe(prior.inputObjectKey)
+      expect(replacement.idempotencyKey).not.toBe(prior.idempotencyKey)
+    }
+
+    await expect(repairProcessor({ mediaAssetId: asset.id, processingRunId: run.id })).resolves.toMatchObject({ waiting: true })
+    const submittedRevisionOne = await database.processingChunk.findMany({
+      where: { processingRunId: run.id, planRevision: 1 }, orderBy: { chunkIndex: 'asc' },
+    })
+    expect(moss.submissions).toBe(5)
+    expect((await database.processingChunk.findUniqueOrThrow({ where: { id: untouchedThird.id } }))).toMatchObject({
+      id: untouchedThird.id, idempotencyKey: untouchedThird.idempotencyKey,
+      externalJobId: untouchedThird.externalJobId,
+    })
+
+    moss.succeed(submittedRevisionOne[0].externalJobId!, { language: 'en', segments: [
+      overlapSegment(submittedRevisionOne[0], submittedRevisionOne[1], 'Handoff.'),
+    ] })
+    moss.succeed(submittedRevisionOne[1].externalJobId!, { language: 'en', segments: [
+      overlapSegment(submittedRevisionOne[1], submittedRevisionOne[0], 'Handoff.'),
+      overlapSegment(submittedRevisionOne[1], revisionZero[2], 'Bridge.'),
+    ] })
+    await database.processingChunk.updateMany({
+      where: { processingRunId: run.id, planRevision: 1 }, data: { nextPollAt: new Date(0) },
+    })
+    await expect(repairProcessor({ mediaAssetId: asset.id, processingRunId: run.id })).resolves.toMatchObject({ completed: true })
+    expect(await database.processingRun.findUniqueOrThrow({ where: { id: run.id } }))
+      .toMatchObject({ activePlanRevision: 1, pendingPlanRevision: null, status: 'SUCCEEDED' })
+    expect(await database.transcriptVersion.findFirstOrThrow({ where: { mediaAssetId: asset.id, status: 'ACTIVE' } }))
+      .toMatchObject({ planRevision: 1 })
+    expect((await database.processingChunk.findMany({
+      where: { processingRunId: run.id, planRevision: 0 }, orderBy: { chunkIndex: 'asc' },
+    })).map((chunk) => ({
+      id: chunk.id, externalJobId: chunk.externalJobId, resultObjectKey: chunk.resultObjectKey,
+      resultVersionId: chunk.resultVersionId, resultChecksum: chunk.resultChecksum,
+    }))).toEqual(immutableResults)
+    expect(await database.mediaObject.findMany({
+      where: { mediaAssetId: asset.id, kind: 'ASR_RAW', deletedAt: null, metadata: { path: ['planRevision'], equals: 0 } },
+      orderBy: { objectKey: 'asc' }, select: { objectKey: true, versionId: true, checksumSha256: true },
+    })).toEqual(preservedAsr)
+  }, 240_000)
+
+  it('fails closed after the one allowed repair still has an ambiguous handoff', async () => {
+    const { asset, run } = await createRun(repairPath, 140_000, '102')
+    const moss = new FakeMossAdapter()
+    const processTranscript = createTranscriptProcessor({ database, storage, moss, env, workerId: 'g3-worker-replan-limit' })
+
+    await processTranscript({ mediaAssetId: asset.id, processingRunId: run.id })
+    const revisionZero = await database.processingChunk.findMany({
+      where: { processingRunId: run.id, planRevision: 0 }, orderBy: { chunkIndex: 'asc' },
+    })
+    moss.succeed(revisionZero[0].externalJobId!, { language: 'en', segments: [
+      overlapSegment(revisionZero[0], revisionZero[1], 'First mismatch.'),
+    ] })
+    moss.succeed(revisionZero[1].externalJobId!, { language: 'en', segments: [
+      overlapSegment(revisionZero[1], revisionZero[0], 'Second mismatch.'),
+      overlapSegment(revisionZero[1], revisionZero[2], 'Bridge.'),
+    ] })
+    moss.succeed(revisionZero[2].externalJobId!, { language: 'en', segments: [
+      overlapSegment(revisionZero[2], revisionZero[1], 'Bridge.'),
+    ] })
+    await database.processingChunk.updateMany({
+      where: { processingRunId: run.id, planRevision: 0 }, data: { nextPollAt: new Date(0) },
+    })
+    await expect(processTranscript({ mediaAssetId: asset.id, processingRunId: run.id }))
+      .resolves.toMatchObject({ waiting: true, replanned: true })
+
+    await processTranscript({ mediaAssetId: asset.id, processingRunId: run.id })
+    const revisionOne = await database.processingChunk.findMany({
+      where: { processingRunId: run.id, planRevision: 1 }, orderBy: { chunkIndex: 'asc' },
+    })
+    moss.succeed(revisionOne[0].externalJobId!, { language: 'en', segments: [
+      overlapSegment(revisionOne[0], revisionOne[1], 'Still first mismatch.'),
+    ] })
+    moss.succeed(revisionOne[1].externalJobId!, { language: 'en', segments: [
+      overlapSegment(revisionOne[1], revisionOne[0], 'Still second mismatch.'),
+    ] })
+    await database.processingChunk.updateMany({
+      where: { processingRunId: run.id, planRevision: 1 }, data: { nextPollAt: new Date(0) },
+    })
+
+    await expect(processTranscript({ mediaAssetId: asset.id, processingRunId: run.id }))
+      .resolves.toMatchObject({ failed: true, errorCode: 'transcript_incomplete' })
+    expect(await database.processingRun.findUniqueOrThrow({ where: { id: run.id } })).toMatchObject({
+      status: 'FAILED', errorCode: 'transcript_incomplete', activePlanRevision: 0, pendingPlanRevision: 1,
+    })
+    expect(await database.processingChunk.count({ where: { processingRunId: run.id, planRevision: 2 } })).toBe(0)
+    expect(await database.transcriptVersion.count({ where: { mediaAssetId: asset.id, status: 'ACTIVE' } })).toBe(0)
+  }, 240_000)
 
   it('keeps the transcript invisible when one required chunk fails', async () => {
     const { asset, run } = await createRun(longPath, 80_000, '2')
@@ -207,6 +390,48 @@ describe('G3 real media pipeline with deterministic Fake MOSS', () => {
     })
     await expect(cleanupTranscriptObjects(database, storage)).resolves.toMatchObject({ cleaned: 2, failed: 0 })
     await expect(processTranscript({ mediaAssetId: asset.id, processingRunId: run.id })).resolves.toEqual({ skipped: true })
+  }, 120_000)
+
+  it('cancels and schedules only the effective overlay pair, never its historical predecessor', async () => {
+    const { asset, run } = await createRun(shortPath, 30_000, '103')
+    const moss = new FakeMossAdapter()
+    const legacy = await moss.submit({
+      idempotencyKey: `g3:legacy-${run.id}`, audioUrl: 'https://example.invalid/legacy.wav', callbackUrl: env.MOSS_CALLBACK_PUBLIC_URL!,
+      language: 'en', modelVersion: env.MOSS_MODEL_VERSION, chunkIndex: 0, startMs: 0, endMs: 30_000,
+    })
+    const replacement = await moss.submit({
+      idempotencyKey: `g3:replacement-${run.id}`, audioUrl: 'https://example.invalid/replacement.wav', callbackUrl: env.MOSS_CALLBACK_PUBLIC_URL!,
+      language: 'en', modelVersion: env.MOSS_MODEL_VERSION, chunkIndex: 0, startMs: 0, endMs: 29_500,
+    })
+    await database.$transaction([
+      database.processingRun.update({
+        where: { id: run.id }, data: { status: 'CANCELLED', pendingPlanRevision: 1, errorCode: 'processing_cancelled' },
+      }),
+      database.processingChunk.create({
+        data: {
+          processingRunId: run.id, planRevision: 0, chunkIndex: 0, startMs: 0, endMs: 30_000,
+          status: 'SUCCEEDED', idempotencyKey: legacy.idempotencyKey, externalJobId: legacy.externalJobId,
+          modelVersion: env.MOSS_MODEL_VERSION, inputObjectKey: `test/${run.id}/legacy.wav`,
+        },
+      }),
+      database.processingChunk.create({
+        data: {
+          processingRunId: run.id, planRevision: 1, chunkIndex: 0, startMs: 0, endMs: 29_500,
+          status: 'CANCELLED', errorCode: 'processing_cancelled', idempotencyKey: replacement.idempotencyKey,
+          externalJobId: replacement.externalJobId, modelVersion: env.MOSS_MODEL_VERSION,
+          inputObjectKey: `test/${run.id}/replacement.wav`, inputVersionId: 'replacement-input-v1', inputChecksum: 'd'.repeat(64),
+        },
+      }),
+    ])
+    const add = vi.fn(async () => undefined)
+    await expect(enqueuePendingTranscriptCancellations(database, { add } as never)).resolves.toEqual({ enqueued: 1 })
+    expect(add).toHaveBeenCalledTimes(1)
+    await expect(cancelExternalTranscriptJobs(database, moss, {
+      mediaAssetId: asset.id, processingRunId: run.id,
+    })).resolves.toEqual({ skipped: false, cancelled: 1 })
+    await expect(moss.query(replacement.externalJobId)).resolves.toMatchObject({ status: 'cancelled' })
+    await expect(moss.query(legacy.externalJobId)).resolves.toMatchObject({ status: 'queued' })
+    await expect(enqueuePendingTranscriptCancellations(database, { add } as never)).resolves.toEqual({ enqueued: 0 })
   }, 120_000)
 
   it('cleans successful audio after 24 hours but retains immutable ASR evidence for seven days', async () => {

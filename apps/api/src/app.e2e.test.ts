@@ -172,6 +172,15 @@ describe('EchoFlow real PostgreSQL, auth, upload and owner boundary', () => {
         inputObjectKey: `test/${transcriptRun.id}/1.wav`,
       },
     ] })
+    await database.processingRun.update({ where: { id: transcriptRun.id }, data: { pendingPlanRevision: 1 } })
+    await database.processingChunk.create({
+      data: {
+        processingRunId: transcriptRun.id, planRevision: 1, chunkIndex: 0, startMs: 0, endMs: 2_900,
+        status: 'SUCCEEDED', idempotencyKey: `test:${transcriptRun.id}:repair:0`, modelVersion: 'moss-test',
+        inputObjectKey: `test/${transcriptRun.id}/plans/1/0.wav`, inputVersionId: 'repair-input-v1',
+        inputChecksum: 'a'.repeat(64),
+      },
+    })
 
     const listed = await request(app.getHttpServer())
       .get('/api/v1/media-assets')
@@ -864,9 +873,24 @@ describe('EchoFlow real PostgreSQL, auth, upload and owner boundary', () => {
         externalCancelledAt: new Date(), errorCode: 'moss_timeout', failedAt: new Date(),
       },
     })
+    await database.processingRun.update({ where: { id: failedRun.id }, data: { pendingPlanRevision: 1 } })
+    const repairChunk = await database.processingChunk.create({
+      data: {
+        processingRunId: failedRun.id, planRevision: 1, chunkIndex: 0, startMs: 0, endMs: 29_500, status: 'FAILED',
+        idempotencyKey: 'g3:' + 'c'.repeat(64), modelVersion: 'fake-moss', inputObjectKey: 'repair-redacted.wav',
+        inputVersionId: 'repair-input-v1', inputChecksum: 'c'.repeat(64),
+        externalJobId: 'moss-retry-repair-job', submittedAt: new Date(), externalUpdatedAt: new Date(),
+        externalCancelledAt: new Date(), errorCode: 'moss_timeout', failedAt: new Date(),
+      },
+    })
     await database.mediaObject.create({ data: {
       mediaAssetId: failedAsset.id, kind: 'AUDIO_CHUNK', bucket: 'test', objectKey: 'redacted.wav',
       contentType: 'audio/wav', sizeBytes: 1n, metadata: { processingRunId: failedRun.id, chunkIndex: 0 },
+    } })
+    await database.mediaObject.create({ data: {
+      mediaAssetId: failedAsset.id, kind: 'AUDIO_CHUNK', bucket: 'test', objectKey: 'repair-redacted.wav',
+      versionId: 'repair-input-v1', checksumSha256: 'c'.repeat(64), contentType: 'audio/wav', sizeBytes: 1n,
+      metadata: { processingRunId: failedRun.id, planRevision: 1, chunkIndex: 0 },
     } })
     const retry = () => request(app.getHttpServer())
       .post(`/api/v1/media-assets/${failedAsset.id}/transcript/retry`)
@@ -876,6 +900,9 @@ describe('EchoFlow real PostgreSQL, auth, upload and owner boundary', () => {
     await retry().expect(201, { accepted: true, processingRunId: failedRun.id, duplicate: true })
     expect(await database.processingRun.findUniqueOrThrow({ where: { id: failedRun.id } })).toMatchObject({ status: 'QUEUED', stage: 'TRANSCRIBING' })
     expect(await database.processingChunk.findUniqueOrThrow({ where: { id: failedChunk.id } })).toMatchObject({
+      status: 'FAILED', errorCode: 'moss_timeout', externalJobId: 'moss-retry-terminal-job',
+    })
+    expect(await database.processingChunk.findUniqueOrThrow({ where: { id: repairChunk.id } })).toMatchObject({
       status: 'QUEUED', errorCode: null, externalJobId: null, submittedAt: null,
       externalUpdatedAt: null, externalCancelledAt: null,
     })
@@ -893,7 +920,8 @@ describe('EchoFlow real PostgreSQL, auth, upload and owner boundary', () => {
     await cancel().expect(201, { cancelled: true, processingRunId: failedRun.id, duplicate: false })
     await cancel().expect(201, { cancelled: true, processingRunId: failedRun.id, duplicate: true })
     expect(await database.processingRun.findUniqueOrThrow({ where: { id: failedRun.id } })).toMatchObject({ status: 'CANCELLED', errorCode: 'processing_cancelled' })
-    expect(await database.processingChunk.findUniqueOrThrow({ where: { id: failedChunk.id } })).toMatchObject({ status: 'CANCELLED', errorCode: 'processing_cancelled' })
+    expect(await database.processingChunk.findUniqueOrThrow({ where: { id: failedChunk.id } })).toMatchObject({ status: 'FAILED', errorCode: 'moss_timeout' })
+    expect(await database.processingChunk.findUniqueOrThrow({ where: { id: repairChunk.id } })).toMatchObject({ status: 'CANCELLED', errorCode: 'processing_cancelled' })
     expect(await database.outboxEvent.count({ where: { eventType: 'media.transcript_cancel_requested' } })).toBe(1)
   })
 })

@@ -1,6 +1,6 @@
 # EchoFlow G3 本地实现验证证据
 
-验证日期：2026-08-16；真实 30 秒补充验证：2026-08-21
+验证日期：2026-08-16；真实 30 秒补充验证：2026-08-21；真实 31 分钟分片验证与不可变 replan/revision 确定性验证：2026-08-22
 
 实施分支：`codex/g3-moss-transcript-20260813`
 
@@ -12,13 +12,13 @@ EchoFlow 代码验收锚点：`ca3e3ad00cdb54a5e32d1ce614db433b3c9d50e9`
 
 MOSS Provider Gateway 锚点：`cdf6eb32f12f593121b669cddf609db7f4215131`
 
-状态：本地实现候选与真实 30 秒 MOSS 冒烟通过；G3 Gate 保持打开
+状态：本地实现候选与真实 30 秒 MOSS 冒烟通过；不可变 replan/revision 确定性验证通过。真实 31 分钟分片验证发现受控的跨片歧义，G3 Gate 保持打开
 
 ## 1. 结论
 
 `8139081` 已形成可恢复的本地 G3 候选链路；`805b93f` 与 `1e5ff7b` 分离了 G2 媒体事实和 G3 字幕进度。2026-08-15 用户确认 segment-first：真实分段时间为 V1 必选，逐词时间为可选增强。`ca3e3ad` 完成共享契约、HTTP Adapter 和跨分片合并修订：没有逐词证据时直接保留真实 segment；文本、时间、重复序列或 speaker 不能唯一消歧时失败关闭，不猜测性发布。MOSS 仓库的 `cdf6eb3` 提供独立 `/api/provider/v1` 机器网关，以稳定身份连接 EchoFlow 和原生 MOSS 任务。
 
-本地自动化、真实 PostgreSQL/Redis/MinIO/FFmpeg 集成、生产构建和独立代码审查均通过，当前没有已知 P0/P1。
+本地自动化、真实 PostgreSQL/Redis/MinIO/FFmpeg 集成、生产构建和独立代码审查均通过，当前没有已知 P0/P1。2026-08-22 的有界不可变 replan/revision 确定性证据另见第 8 节；具体提交锚点以 Git 历史为准。
 
 这不是 G3 关闭证据。机器接口、认证和 segment-first 响应合同已经本地实现；2026-08-21 又以固定真实模型完成了 30 秒音频的 CLI 与隔离 Provider 冒烟。它没有调用 EchoFlow G3 API/Worker/对象存储形成完整字幕发布，也没有完成 5/30/60/120 分钟真实 MOSS 矩阵、真实故障恢复或人工准确率基准；因此不能声称真实长视频已经由 MOSS 生成合格字幕，也不能进入 G4。
 
@@ -104,7 +104,54 @@ MOSS 代码锚点仍为 `cdf6eb32f12f593121b669cddf609db7f4215131`，本轮没�
 
 独立 Reviewer 对输入/结果一致性、时间不变量、监听清场和源代码锚点复核后结论为 P0=0、P1=0。验证结束时 `8002` 和 `8099` 无监听；旧 CPU GUI `8001` 容器保持 healthy 且未重启。唯一 P2 证据缺口是没有人工参考转写，因此没有 WER/CER 等量化准确率结论。
 
-## 7. 仍然阻塞 G3 的外部证据
+## 7. 真实 31 分钟 MOSS 分片验证（未通过，受控失败）
+
+本轮输入是用户本机的一段私人英语长视频，经本地归一化为 16 kHz / mono PCM WAV 后用于验证。原视频、音频、转写正文、可访问 URL、临时 Bearer 和原始 Provider 结果均没有进入仓库、证据文件或控制台输出；本节只保留可复现的结构性指标。
+
+### 已验证事实
+
+- 固定 revision `e8681d68e7042738ffca8ac8212bc8fcb1131ab8` 在 RTX 4060 Laptop GPU / BF16 下，整段约 31 分钟单块推理发生真实 CUDA OOM；约 10 分钟单块在 60 分钟内未完成。因此此设备上的候选计划是约 5 分钟的 silence-aware 分片，片间保留 2 秒上下文，而不是把整段或 10 分钟块当作可用路径。
+- 该计划产生 6 块真实音频。所有实际 Provider 终态均为 `succeeded`，并逐块通过 `language=en`、非空 segment、整数毫秒、范围、单调性和无伪造 `words` 的检查；Provider 监听和本地静态音频监听均在每轮后确认关闭。
+- 初次完整六块调用 EchoFlow 的真实 `buildTranscript` 时，在第 2→3 个交接处失败，内部分类为 `ambiguous_segment_handoff`。这不是 Provider 崩溃、时间越界或媒体格式错误，而是两侧 segment-only 转写没有满足唯一 suffix→prefix 文本和时间重叠证据。按 G3 合同，系统正确地拒绝生成 ACTIVE，而没有猜测性拼接。
+- 为验证“重切到静音边界”是否有效，实验把第 2→3 核心边界从 `886744ms` 移至已检测到的 `882003ms`（1,254ms 静音中心），只重跑相邻两块，并使用包含实际范围的独立实验幂等身份。两块分别得到 80 个合格 segment；再做六块真实合并时，首次失败前移到第 3→4 个交接，证明这一处 repair 的确消除了第 2→3 歧义。
+- 第二次实验保留上述成功边界，并把第 3→4 边界从 `1190118ms` 移至 `1198254ms`（763ms 静音中心），仅重跑第 3、4 块。两块均通过 Provider 不变量，但完整合并仍在第 3→4 处以同一受控歧义失败。因而不能把“随机换一个静音点”写成可发布的自动修复算法。
+- MOSS Provider 的本地工作树额外修复了真实结果中观测到的末段 40ms 量化越界：只允许原始结果的最后一段在不超过 50ms 时被裁至已验证的 WAV 上界；非末段、较大越界、空区间、旧任务缺少时长、以及下载 WAV 与声明范围不匹配时均失败关闭。该工作树的 `unittest discover -s tests -v` 为 58 passed，`compileall` 通过；EchoFlow 的 `merge.test.ts` 为 15 passed，Worker lint 与 build 通过。本轮没有提交或推送这些仍在验证中的工作树改动。
+
+### 结论与不可省略的下一步
+
+真实模型、Provider、5 分钟分片和 Provider 边界校验已被证明可运行；“完整长视频字幕可原子发布”尚未通过。MOSS 当前只提供 segment 时间，缺少可验证的逐词时间；因此内部 LCS、时间所有权或保留两侧的降级拼接都可能静默丢字、重复或改变语序，不能替代严格合并。
+
+若要继续自动 repair，必须先实现有界的不可变 replan：每次 repair 增加 `planRevision`，保留旧 `ProcessingChunk`，只重跑相邻 pair，并让 Provider 身份绑定 `planRevision + startMs + endMs + 实际输入 checksum/version`。当前 Worker 的身份只含 source/pipeline/stage/chunkIndex/model，移动边界会与旧 Job 冲突；数据库也只允许同一 Run 下一个 `chunkIndex`，因此不能安全地在原记录上覆盖。repair 上限应为一次；仍无唯一 suffix→prefix 证据时终态为 `transcript_incomplete`，不得发布 ACTIVE。
+
+本节是一次失败关闭的真实长媒体证据，而不是 G3 关闭或端到端发布证据。
+
+## 8. 有界不可变 replan/revision（确定性验证通过）
+
+### 已验证事实
+
+- 新增增量迁移 `20260822000100_g3_plan_revision_repair`：`ProcessingRun` 保存 active/pending plan revision 和安全的 repair 元数据；`ProcessingChunk` 的唯一身份扩展为 `run + planRevision + chunkIndex`；`TranscriptVersion` 记录发布计划 revision。数据库约束把自动修复限制为 `0 → 1`，并通过 trigger 拒绝修改已有分片的范围、输入身份、模型、幂等键或已写入的 ASR 结果身份；历史 revision 0 行允许保持旧的空 `inputChecksum`。
+- 仅当严格合并返回结构化 `ambiguous_segment_handoff` 时，Worker 才可扫描规范化音频中的静音窗口，创建 revision 1 的相邻 pair overlay。旧分片、输入对象、原始 ASR 结果、外部任务和既有结果对象均不覆盖、不删除；若修复后的严格合并仍歧义，任务以 `transcript_incomplete` 失败关闭，不会创建 revision 2 或发布 ACTIVE。
+- 重规划分片的对象键和 MOSS 幂等身份包含 plan revision、实际范围、输入对象/version/checksum 和原有效计划的 modelVersion。部署间模型配置变动不会把两个模型的结果混入同一计划。
+- API 状态计数、显式重试、取消扫描和 Worker 的外部 MOSS 取消均先计算“有效 overlay”；它们不会把旧 pair 重新计数、重试或取消。取消态仍会处理当前有效计划中已经标记为 `CANCELLED` 的外部任务。
+
+### 本机命令与结果
+
+| 命令/检查 | 结果 | 证据边界 |
+|---|---|---|
+| `pnpm --filter @online-learning/database test:prepare echoflow_g3_replan_migration_test` | 通过；从空库依次应用 4 条迁移 | 验证新迁移可在隔离 PostgreSQL 部署；不是含既有 revision 0 生产数据的升级演练 |
+| `pnpm --filter @online-learning/worker test` | 71 passed，4 skipped | 使用真实 PostgreSQL/Redis/MinIO/FFmpeg、确定性 Fake MOSS 和约 140 秒合成媒体；覆盖相邻 pair 重规划、旧输入/结果不可变、模型继承、二次歧义失败关闭、有效 overlay 取消 |
+| `pnpm --filter @online-learning/database test` | 9 passed | 包含 schema/迁移合同断言 |
+| `pnpm --filter @online-learning/api test` | 25 passed | 覆盖 effective overlay 的状态计数、重试和取消边界 |
+| `pnpm lint` | 通过 | 工作区 TypeScript 静态检查 |
+| `pnpm build` | 通过 | 所有共享包与 Web/Admin/API/Worker 生产构建 |
+| `pnpm --workspace-concurrency=1 test` | 167 passed，4 skipped | 完整工作区回归；应用会为 API、Worker 使用各自的隔离数据库 |
+| 独立只读审查 | P0=0、P1=0 | 仍有 P2：既有 revision 0 数据升级演练、pending revision 恢复入队、以及静音检测基础设施错误的更精细分类 |
+
+### 未验证边界与结论
+
+本节不读取或记录用户私人视频、音频、字幕正文、对象键、临时 URL 或凭据。它验证的是可恢复的数据模型与确定性行为，不是实际 MOSS 推理或真实长视频的端到端发布。仍需将最终代码提交后，从真实 5 分钟样本开始执行 EchoFlow Worker → 对象存储 → MOSS Provider → 严格合并 → 原子 ACTIVE 发布的闭环，再继续 30/60/120 分钟矩阵。
+
+## 9. 仍然阻塞 G3 的外部证据
 
 以下任一项不能由 Fake MOSS 或测试数量替代：
 

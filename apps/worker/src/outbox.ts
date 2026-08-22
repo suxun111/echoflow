@@ -7,6 +7,17 @@ import { G3_PIPELINE_VERSION } from './transcript/constants'
 
 export type MediaQueueJob = PlaybackJob | TranscriptJob
 type QueueWriter = Pick<Queue<MediaQueueJob>, 'add'>
+type RevisionedChunk = { chunkIndex: number; planRevision: number }
+
+function effectivePlanChunks<T extends RevisionedChunk>(chunks: readonly T[], revision: number): T[] {
+  const selected = new Map<number, T>()
+  for (const chunk of chunks) {
+    if (chunk.planRevision > revision) continue
+    const current = selected.get(chunk.chunkIndex)
+    if (!current || chunk.planRevision > current.planRevision) selected.set(chunk.chunkIndex, chunk)
+  }
+  return [...selected.values()]
+}
 
 function isPayload(value: unknown): value is TranscriptJob & { attempt?: number } {
   return typeof value === 'object' && value !== null
@@ -133,19 +144,39 @@ export async function enqueueRecoverableTranscriptRuns(database: PrismaClient, q
 }
 
 export async function enqueuePendingTranscriptCancellations(database: PrismaClient, queue: QueueWriter) {
-  const runs = await database.processingRun.findMany({
+  const candidates = await database.processingRun.findMany({
     where: {
       pipelineVersion: G3_PIPELINE_VERSION,
       OR: [
-        { status: 'CANCELLED', chunks: { some: { externalCancelledAt: null } } },
+        { status: 'CANCELLED', chunks: { some: { status: 'CANCELLED', externalCancelledAt: null } } },
         {
           status: 'FAILED',
-          chunks: { some: { status: 'FAILED', errorCode: 'moss_timeout', externalCancelledAt: null } },
+          chunks: { some: {
+            externalCancelledAt: null,
+            OR: [
+              { status: { in: ['QUEUED', 'PROCESSING', 'VALIDATING'] } },
+              { status: 'FAILED', errorCode: 'moss_timeout' },
+            ],
+          } },
         },
       ],
+    }, take: 100,
+    select: {
+      id: true, mediaAssetId: true, status: true, activePlanRevision: true, pendingPlanRevision: true,
+      chunks: { select: { chunkIndex: true, planRevision: true, status: true, errorCode: true, externalCancelledAt: true } },
     },
-    select: { id: true, mediaAssetId: true }, take: 100,
   })
+  const runs = candidates.filter((run) => {
+    const revision = run.pendingPlanRevision ?? run.activePlanRevision
+    const chunks = effectivePlanChunks(run.chunks, revision)
+    return run.status === 'CANCELLED'
+      ? chunks.some((chunk) => chunk.status === 'CANCELLED' && chunk.externalCancelledAt === null)
+      : chunks.some((chunk) => (
+        (['QUEUED', 'PROCESSING', 'VALIDATING'].includes(chunk.status)
+          || (chunk.status === 'FAILED' && chunk.errorCode === 'moss_timeout'))
+        && chunk.externalCancelledAt === null
+      ))
+  }).slice(0, 100)
   const bucket = Math.floor(Date.now() / 5_000)
   for (const run of runs) {
     await queue.add('media.transcript_cancel_requested', { mediaAssetId: run.mediaAssetId, processingRunId: run.id }, {

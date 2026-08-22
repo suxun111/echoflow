@@ -245,6 +245,9 @@ model ProcessingRun {
   ownerId         String            @db.Uuid
   mediaAssetId    String            @db.Uuid
   pipelineVersion String            @db.VarChar(128)
+  activePlanRevision Int             @default(0)
+  pendingPlanRevision Int?
+  repairPlan      Json?
   status          ProcessingStatus  @default(QUEUED)
   stage           ProcessingStage   @default(UPLOAD_VERIFIED)
   attempt         Int               @default(0)
@@ -273,6 +276,7 @@ model ProcessingRun {
 model ProcessingChunk {
   id              String           @id @default(uuid()) @db.Uuid
   processingRunId String           @db.Uuid
+  planRevision    Int              @default(0)
   chunkIndex      Int
   startMs         Int
   endMs           Int
@@ -283,6 +287,7 @@ model ProcessingChunk {
   externalJobId   String?          @unique @db.VarChar(512)
   inputObjectKey  String           @db.VarChar(1024)
   inputVersionId  String?          @db.VarChar(512)
+  inputChecksum   String?          @db.Char(64)
   resultObjectKey String?          @db.VarChar(1024)
   resultVersionId String?          @db.VarChar(512)
   resultChecksum  String?          @db.Char(64)
@@ -302,7 +307,8 @@ model ProcessingChunk {
   processingRun   ProcessingRun    @relation(fields: [processingRunId], references: [id], onDelete: Cascade)
   callbackReceipts MossCallbackReceipt[]
 
-  @@unique([processingRunId, chunkIndex])
+  @@unique([processingRunId, planRevision, chunkIndex])
+  @@index([processingRunId, chunkIndex, planRevision])
   @@index([status, updatedAt])
   @@index([status, nextPollAt])
 }
@@ -348,6 +354,7 @@ model TranscriptVersion {
   mediaAssetId  String           @db.Uuid
   processingRunId String         @unique @db.Uuid
   version       Int
+  planRevision  Int              @default(0)
   language      String           @default("en") @db.VarChar(16)
   pipelineVersion String         @db.VarChar(128)
   modelVersion String            @db.VarChar(128)

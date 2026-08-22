@@ -8,6 +8,22 @@ import { SERVER_ENV } from '../../config/app-config.module'
 import { DatabaseService } from '../../database/database.module'
 import { StorageService } from '../../storage/storage.module'
 
+type RevisionedChunk = { chunkIndex: number; planRevision: number }
+
+function currentPlanRevision(run: { activePlanRevision: number; pendingPlanRevision: number | null }) {
+  return run.pendingPlanRevision ?? run.activePlanRevision
+}
+
+function effectivePlanChunks<T extends RevisionedChunk>(chunks: readonly T[], revision: number): T[] {
+  const selected = new Map<number, T>()
+  for (const chunk of chunks) {
+    if (chunk.planRevision > revision) continue
+    const current = selected.get(chunk.chunkIndex)
+    if (!current || chunk.planRevision > current.planRevision) selected.set(chunk.chunkIndex, chunk)
+  }
+  return [...selected.values()].sort((left, right) => left.chunkIndex - right.chunkIndex)
+}
+
 function toView(asset: {
   id: string
   uploadSessionId: string | null
@@ -21,13 +37,18 @@ function toView(asset: {
     stage: string
     errorCode: string | null
     updatedAt: Date
-    chunks: Array<{ status: string }>
+    activePlanRevision: number
+    pendingPlanRevision: number | null
+    chunks: Array<{ chunkIndex: number; planRevision: number; status: string }>
   }>
   createdAt: Date
   updatedAt: Date
 }): MediaAssetView {
   const playbackRun = asset.processingRuns?.find((run) => run.pipelineVersion === 'g2-playback-v1')
   const transcriptRun = asset.processingRuns?.find((run) => run.pipelineVersion === 'g3-transcript-v1')
+  const transcriptChunks = transcriptRun
+    ? effectivePlanChunks(transcriptRun.chunks, currentPlanRevision(transcriptRun))
+    : []
   return {
     id: asset.id,
     uploadSessionId: asset.uploadSessionId,
@@ -40,8 +61,8 @@ function toView(asset: {
     transcriptProcessing: transcriptRun ? {
       status: transcriptRun.status.toLowerCase() as NonNullable<MediaAssetView['transcriptProcessing']>['status'],
       stage: transcriptRun.stage.toLowerCase() as NonNullable<MediaAssetView['transcriptProcessing']>['stage'],
-      completedChunks: transcriptRun.chunks.filter((chunk) => chunk.status === 'SUCCEEDED').length,
-      totalChunks: transcriptRun.chunks.length,
+      completedChunks: transcriptChunks.filter((chunk) => chunk.status === 'SUCCEEDED').length,
+      totalChunks: transcriptChunks.length,
       errorCode: transcriptRun.errorCode,
       updatedAt: transcriptRun.updatedAt.toISOString(),
     } : undefined,
@@ -64,7 +85,8 @@ export class MediaAssetsController {
       orderBy: { createdAt: 'desc' },
       select: {
         pipelineVersion: true, status: true, stage: true, errorCode: true, updatedAt: true,
-        chunks: { select: { status: true } },
+        activePlanRevision: true, pendingPlanRevision: true,
+        chunks: { select: { chunkIndex: true, planRevision: true, status: true } },
       },
     } as const
   }
@@ -165,20 +187,28 @@ export class MediaAssetsController {
       if (!run.errorCode || !retryableCodes.has(run.errorCode)) {
         throw new ApiException(422, 'moss_rejected', '该失败需要修正输入或 MOSS 配置后以新流水线版本处理')
       }
-      const hasChunks = run.chunks.length > 0
+      const planRevision = currentPlanRevision(run)
+      const currentChunks = effectivePlanChunks(run.chunks, planRevision)
+      const hasChunks = currentChunks.length > 0
       if (hasChunks) {
-        const activeInputs = await transaction.mediaObject.count({
+        const activeInputs = await transaction.mediaObject.findMany({
           where: {
             mediaAssetId, kind: 'AUDIO_CHUNK', deletedAt: null,
-            metadata: { path: ['processingRunId'], equals: run.id },
+            objectKey: { in: currentChunks.map((chunk) => chunk.inputObjectKey) },
           },
+          select: { objectKey: true, versionId: true, checksumSha256: true },
         })
-        if (activeInputs !== run.chunks.length) {
+        const hasEveryInput = currentChunks.every((chunk) => activeInputs.some((object) => (
+          object.objectKey === chunk.inputObjectKey
+          && object.versionId === chunk.inputVersionId
+          && (chunk.inputChecksum === null || object.checksumSha256 === chunk.inputChecksum)
+        )))
+        if (!hasEveryInput) {
           throw new ApiException(422, 'moss_rejected', '字幕临时音频已经过期，需要用新流水线版本重新处理')
         }
       }
       await transaction.processingChunk.updateMany({
-        where: { processingRunId: run.id, status: 'FAILED', errorCode: { in: [...retryableCodes] } },
+        where: { id: { in: currentChunks.map((chunk) => chunk.id) }, status: 'FAILED', errorCode: { in: [...retryableCodes] } },
         data: {
           status: 'QUEUED', attempt: 0, failedAt: null, nextPollAt: new Date(),
           errorCode: null, errorDetail: Prisma.DbNull, externalJobId: null,
@@ -213,7 +243,7 @@ export class MediaAssetsController {
       await transaction.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${mediaAssetId}, 0))`
       const asset = await transaction.mediaAsset.findFirst({
         where: { id: mediaAssetId, ownerId: user.id, deletedAt: null },
-        include: { processingRuns: { where: { pipelineVersion: 'g3-transcript-v1' }, take: 1 } },
+        include: { processingRuns: { where: { pipelineVersion: 'g3-transcript-v1' }, take: 1, include: { chunks: true } } },
       })
       if (!asset) throw new ApiException(404, 'not_found', '媒体资产不存在')
       const run = asset.processingRuns[0]
@@ -224,6 +254,7 @@ export class MediaAssetsController {
       }
       if (run.status === 'SUCCEEDED') throw new ApiException(409, 'transcript_active_conflict', '已发布的字幕任务不能取消')
       if (run.status !== 'CANCELLED') {
+        const currentChunks = effectivePlanChunks(run.chunks, currentPlanRevision(run))
         await transaction.processingRun.update({
           where: { id: run.id }, data: {
             status: 'CANCELLED', errorCode: 'processing_cancelled',
@@ -231,7 +262,7 @@ export class MediaAssetsController {
           },
         })
         await transaction.processingChunk.updateMany({
-          where: { processingRunId: run.id, status: { in: ['QUEUED', 'PROCESSING', 'VALIDATING'] } },
+          where: { id: { in: currentChunks.map((chunk) => chunk.id) }, status: { in: ['QUEUED', 'PROCESSING', 'VALIDATING'] } },
           data: {
             status: 'CANCELLED', errorCode: 'processing_cancelled', completedAt: new Date(),
             nextPollAt: null, leaseOwner: null, leaseExpiresAt: null,
