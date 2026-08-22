@@ -1,6 +1,6 @@
 # EchoFlow G3 本地实现验证证据
 
-验证日期：2026-08-16；真实 30 秒补充验证：2026-08-21；真实 31 分钟分片验证与不可变 replan/revision 确定性验证：2026-08-22
+验证日期：2026-08-16；真实 30 秒补充验证：2026-08-21；真实 31 分钟分片验证、不可变 replan/revision 确定性验证与真实 5 分钟完整发布：2026-08-22
 
 实施分支：`codex/g3-moss-transcript-20260813`
 
@@ -8,19 +8,19 @@
 
 合同锚点：`b191499`
 
-EchoFlow 代码验收锚点：`ca3e3ad00cdb54a5e32d1ce614db433b3c9d50e9`
+EchoFlow 代码验收锚点：`ca3e3ad00cdb54a5e32d1ce614db433b3c9d50e9`；本轮音频边界修复：`8873c35`
 
-MOSS Provider Gateway 锚点：`cdf6eb32f12f593121b669cddf609db7f4215131`
+MOSS Provider Gateway 锚点：`cdf6eb32f12f593121b669cddf609db7f4215131`；输入范围校验锚点：`2f1c2ad`
 
-状态：本地实现候选与真实 30 秒 MOSS 冒烟通过；不可变 replan/revision 确定性验证通过。真实 31 分钟分片验证发现受控的跨片歧义，G3 Gate 保持打开
+状态：本地实现候选、真实 30 秒 MOSS 冒烟、不可变 replan/revision 确定性验证与一次真实 5 分钟 EchoFlow → MOSS → ACTIVE 字幕发布均通过。真实约 31 分钟分片验证仍有受控跨片歧义，且 30/60/120 分钟及故障恢复矩阵未完成，G3 Gate 保持打开
 
 ## 1. 结论
 
-`8139081` 已形成可恢复的本地 G3 候选链路；`805b93f` 与 `1e5ff7b` 分离了 G2 媒体事实和 G3 字幕进度。2026-08-15 用户确认 segment-first：真实分段时间为 V1 必选，逐词时间为可选增强。`ca3e3ad` 完成共享契约、HTTP Adapter 和跨分片合并修订：没有逐词证据时直接保留真实 segment；文本、时间、重复序列或 speaker 不能唯一消歧时失败关闭，不猜测性发布。MOSS 仓库的 `cdf6eb3` 提供独立 `/api/provider/v1` 机器网关，以稳定身份连接 EchoFlow 和原生 MOSS 任务。
+`8139081` 已形成可恢复的本地 G3 候选链路；`805b93f` 与 `1e5ff7b` 分离了 G2 媒体事实和 G3 字幕进度。2026-08-15 用户确认 segment-first：真实分段时间为 V1 必选，逐词时间为可选增强。`ca3e3ad` 完成共享契约、HTTP Adapter 和跨分片合并修订：没有逐词证据时直接保留真实 segment；文本、时间、重复序列或 speaker 不能唯一消歧时失败关闭，不猜测性发布。MOSS 仓库的 `cdf6eb3` 提供独立 `/api/provider/v1` 机器网关，以稳定身份连接 EchoFlow 和原生 MOSS 任务。`8873c35` 进一步把 MOSS 分片计划上限钳制到经 Worker 生成并实测的规范化 WAV 时长，避免以略长的视频容器时长向 Provider 声明不存在的尾部音频。
 
-本地自动化、真实 PostgreSQL/Redis/MinIO/FFmpeg 集成、生产构建和独立代码审查均通过，当前没有已知 P0/P1。2026-08-22 的有界不可变 replan/revision 确定性证据另见第 8 节；具体提交锚点以 Git 历史为准。
+本地自动化、真实 PostgreSQL/Redis/MinIO/FFmpeg 集成、生产构建和独立代码审查均通过，当前没有已知 P0/P1。2026-08-22 的有界不可变 replan/revision 确定性证据见第 8 节，真实 5 分钟端到端发布证据见第 9 节；具体提交锚点以 Git 历史为准。
 
-这不是 G3 关闭证据。机器接口、认证和 segment-first 响应合同已经本地实现；2026-08-21 又以固定真实模型完成了 30 秒音频的 CLI 与隔离 Provider 冒烟。它没有调用 EchoFlow G3 API/Worker/对象存储形成完整字幕发布，也没有完成 5/30/60/120 分钟真实 MOSS 矩阵、真实故障恢复或人工准确率基准；因此不能声称真实长视频已经由 MOSS 生成合格字幕，也不能进入 G4。
+这不是 G3 关闭证据。机器接口、认证和 segment-first 响应合同已经本地实现；2026-08-21 以固定真实模型完成了 30 秒音频的 CLI 与隔离 Provider 冒烟，2026-08-22 又完成一次真实 5 分钟 EchoFlow G3 API/Worker/对象存储/Provider/严格合并/原子 ACTIVE 发布。它仍未完成 30/60/120 分钟真实 MOSS 矩阵、真实故障恢复或人工准确率基准；因此不能关闭 G3，也不能进入 G4。
 
 ## 2. 已实现并验证的边界
 
@@ -35,7 +35,7 @@ MOSS Provider Gateway 锚点：`cdf6eb32f12f593121b669cddf609db7f4215131`
 - API 把 `g2-playback-v1` ProcessingRun 序列化为顶层媒体阶段/错误，只把 `g3-transcript-v1` ProcessingRun 序列化为字幕进度；Web 只在持久阶段确为 `transcript_ready` 时显示“字幕已完成”，并保留媒体格式失败的专用重传指引。
 - MOSS Provider Gateway 使用 Bearer Token 和精确 `host:port` 白名单，逐跳验证重定向；provider-only listener 不暴露原 GUI `/api/jobs`；稳定 Job/Attempt 身份、不可变结果、取消 fencing、重启协调和 24 小时原生任务/首次读取后 7 天结果 TTL 均持久化。
 
-## 3. 代码锚点 `ca3e3ad` / `cdf6eb3` 的确定性验证
+## 3. 代码锚点与确定性验证
 
 运行环境：Windows；Node `v24.18.0`；pnpm `11.9.0`；Docker `29.6.2`；FFmpeg/ffprobe `8.1.2`。
 
@@ -43,7 +43,7 @@ MOSS Provider Gateway 锚点：`cdf6eb32f12f593121b669cddf609db7f4215131`
 |---|---|---|
 | `docker compose -f infrastructure/docker-compose.yml ps` | PostgreSQL、Redis、MinIO 均 healthy | 本机开发基础设施，不代表生产环境 |
 | `pnpm lint` | 通过 | 5 个共享包和 4 个应用的 TypeScript 静态检查 |
-| `pnpm test` | 160 passed，4 skipped | 包含真实 PostgreSQL/MinIO/Redis/FFmpeg 和确定性 Fake MOSS；跳过项是需设置 `RUN_G2_LONG_MEDIA=true` 才执行的自生成 G2 长媒体矩阵 |
+| `pnpm test` | 168 passed，4 skipped | 包含真实 PostgreSQL/MinIO/Redis/FFmpeg 和确定性 Fake MOSS；跳过项是需设置 `RUN_G2_LONG_MEDIA=true` 才执行的自生成 G2 长媒体矩阵 |
 | `pnpm build` | 通过 | config/contracts/database/storage/ui 与 Web/Admin/API/Worker 生产构建 |
 | MOSS `compileall` + `unittest discover` | 52 passed | 在隔离 Docker 运行依赖中复制只读源码后执行；其中 Provider API 13 项 |
 | 8002 隔离 Provider 运行态 | healthy；ready 200；旧 `/api/jobs` 404；未认证 401 | EchoFlow Adapter 可访问；失败 Job 在容器重启前后保持同一 `externalJobId`；未加载模型，不证明推理 |
@@ -59,13 +59,13 @@ MOSS Provider Gateway 锚点：`cdf6eb32f12f593121b669cddf609db7f4215131`
 |---|---:|---:|
 | Config | 13 | 0 |
 | Contracts | 6 | 0 |
-| Database | 8 | 0 |
+| Database | 9 | 0 |
 | Web | 43 | 0 |
 | API | 25 | 0 |
-| Worker | 65 | 4 |
-| 合计 | 160 | 4 |
+| Worker | 72 | 4 |
+| 合计 | 168 | 4 |
 
-Worker 的 65 个通过测试中，G3 主流水线为 28 个，另含 MOSS Adapter 8 个、分片 4 个、合并校验 14 个和 G2 播放回归 11 个。G3 测试覆盖成功发布、单片失败、取消、24 小时/7 天保留、Run/Chunk 代际接管、真实子进程 kill/restart、提交和上传响应丢失、迟到上传、对象 checksum 损坏、发布事务回滚、Redis 空队列重建、exact Version 清理，以及分片边界丢词/重复/多解/speaker 冲突的失败关闭。
+Worker 的 72 个通过测试中，G3 主流水线为 32 个，另含 MOSS Adapter 8 个、分片 6 个、合并校验 15 个和 G2 播放回归 11 个。G3 测试覆盖成功发布、单片失败、取消、24 小时/7 天保留、Run/Chunk 代际接管、真实子进程 kill/restart、提交和上传响应丢失、迟到上传、对象 checksum 损坏、发布事务回滚、Redis 空队列重建、exact Version 清理，以及分片边界丢词/重复/多解/speaker 冲突的失败关闭；其中新增回归验证容器媒体时长略长于规范化 WAV 时，最后一个 MOSS 分片仍不越界。
 
 ## 4. 独立审查
 
@@ -149,13 +149,46 @@ MOSS 代码锚点仍为 `cdf6eb32f12f593121b669cddf609db7f4215131`，本轮没�
 
 ### 未验证边界与结论
 
-本节不读取或记录用户私人视频、音频、字幕正文、对象键、临时 URL 或凭据。它验证的是可恢复的数据模型与确定性行为，不是实际 MOSS 推理或真实长视频的端到端发布。仍需将最终代码提交后，从真实 5 分钟样本开始执行 EchoFlow Worker → 对象存储 → MOSS Provider → 严格合并 → 原子 ACTIVE 发布的闭环，再继续 30/60/120 分钟矩阵。
+本节不读取或记录用户私人视频、音频、字幕正文、对象键、临时 URL 或凭据。它验证的是可恢复的数据模型与确定性行为；真实 MOSS 的 5 分钟端到端发布已在第 9 节完成，但仍需继续 30/60/120 分钟矩阵。
 
-## 9. 仍然阻塞 G3 的外部证据
+## 9. 真实 5 分钟 EchoFlow → MOSS → ACTIVE 字幕发布（通过）
+
+本节使用一段经用户授权的私人英语视频。原文件路径、音视频内容、字幕正文、对象键、签名 URL、Bearer、数据库主键和原始 Provider 响应均未写入仓库、证据文件或控制台输出；只保留可复核的时长、计数、状态和提交锚点。
+
+### 9.1 受控失败与根因
+
+第一次独立 5 分钟尝试完成 G2 上传与媒体探测，但 G3 的最后一个请求被 Provider 以 `audio_duration_mismatch` 拒绝。已验证事实是：视频容器时长为 `300123ms`，由 Worker 用 FFmpeg 生成的 16 kHz/单声道/PCM WAV 实测为 `300002ms`；旧计划把最后一段声明到视频上界，多出 `121ms`，超过 Provider 的 `50ms` 容差。该失败没有发布任何 ACTIVE 字幕，且第一次运行的独立数据库、桶和日志被保留，未重试或覆盖。
+
+`8873c35` 的修复从规范化 WAV 的 RIFF/PCM 数据计算实际时长，以 `min(媒体时长, 规范化音频时长)` 规划初始分片；有界 repair 在重新下载并校验同一 WAV 后使用相同上界。字幕版本仍保留视频容器时长，允许视频存在短暂静音尾部，避免把播放器时间轴错误裁短。
+
+### 9.2 第二次独立运行的已验证事实
+
+- 在全新的 PostgreSQL 数据库、启用 versioning 的 MinIO 桶和空 Redis 逻辑库中部署 4 条迁移；未复用第一次失败的任务、队列或对象版本。
+- 隔离 Provider、API 与 Worker 均启动且健康；主 Docker PostgreSQL、Redis、MinIO 和既有 `8001` GUI 容器均未重启或修改。
+- 真实 OTP、5 Part Multipart 直传完成 `25,311,688` bytes；G2 将资产变为 `PLAYABLE`，并以 ffprobe 记录 `300123ms` 视频时长。
+- G3 将同一原片规范化为 `300002ms` WAV，创建 3 个分片，范围总体为 `[0, 300002]`；3/3 外部 MOSS 分片均成功。
+- G3 `ProcessingRun` 的最终事实为 `SUCCEEDED / TRANSCRIPT_READY`；发布 1 个 ACTIVE `TranscriptVersion`，版本时长为 `300123ms`、Cue 数为 71；Cue 起止时间单调、非空、在 `[0, 300123]` 内，最末 Cue 结束于 `299980ms`。
+- 隔离运行结束后只终止其 Provider/API/Worker 进程树以释放 GPU 与端口；没有删除第一次或第二次的验证数据库、桶、输入副本或排障证据。
+
+### 9.3 本轮代码与审查验证
+
+| 命令/检查 | 结果 | 证据边界 |
+|---|---|---|
+| `pnpm --filter @online-learning/worker test -- src/processors/transcript.test.ts` | 32 passed | 包含真实 FFmpeg/MinIO/PostgreSQL 的新增尾部时长回归 |
+| `pnpm lint` | 通过 | 当前 `8873c35` 的全仓 TypeScript 静态检查 |
+| `pnpm test` | 168 passed，4 skipped | 当前 `8873c35` 的全仓回归；跳过项未作为通过依据 |
+| `pnpm build` | 通过 | 当前 `8873c35` 的全仓生产构建 |
+| 本轮代码/文档独立只读审查 | P0=0，P1=0 | 已确认初始计划与一次有界 repair 均以实测 WAV 上界为准；P2 是更贴近真实短音轨 repair 夹具和畸形 WAV 解析硬化，不覆盖尚未完成的 30/60/120 分钟运行矩阵 |
+
+### 9.4 未验证边界
+
+本次证明一次真实 5 分钟闭环，不证明 30/60/120 分钟可稳定发布，不证明跨片歧义一定可由一次 repair 消除，也不证明 MOSS/Worker 重启、轮询丢失、429/503、超时、取消或人工准确率基准已通过。
+
+## 10. 仍然阻塞 G3 的外部证据
 
 以下任一项不能由 Fake MOSS 或测试数量替代：
 
-1. 使用真实 MOSS 完成 5/30/60/120 分钟私人 MP4 矩阵；30 秒 WAV 冒烟不能替代真实长视频和分片边界；
+1. 使用真实 MOSS 完成剩余 30/60/120 分钟私人 MP4 矩阵；30 秒 WAV 冒烟不能替代真实长视频和分片边界；
 2. 核对完整英文、单调且无越界的真实分段时间、分片边界、模型版本和唯一 ACTIVE 发布；若 Provider 返回逐词时间，再额外核对逐词时间；
 3. 在真实推理中演练 MOSS/Worker 重启、轮询丢失、429/503、超时、取消和恢复；
 4. 记录端到端耗时、吞吐、峰值内存、对象大小、供应方错误分类和成本依据；

@@ -9,19 +9,19 @@
 | 字段 | 当前值 |
 |---|---|
 | Goal | `v0.5.0-alpha.1` |
-| Gate | `G1`、`G2` 已关闭；`G3` 已完成本地候选、真实 30 秒 MOSS 冒烟，以及一次有界不可变 replan/revision 的确定性验证。真实约 31 分钟分片验证仍在跨片 segment 歧义处受控失败，长媒体与完整纵向门禁未通过，Gate 保持打开 |
+| Gate | `G1`、`G2` 已关闭；`G3` 已完成本地候选、真实 30 秒 MOSS 冒烟、有界不可变 replan/revision 的确定性验证，以及一次真实 5 分钟 EchoFlow → MOSS → ACTIVE 字幕发布。真实约 31 分钟分片验证仍在跨片 segment 歧义处受控失败，且 30/60/120 分钟及故障恢复矩阵未通过，Gate 保持打开 |
 | 唯一 trunk | `master` |
 | V1 产品代码审计源点 | `42968ad` |
 | G0 文档基线 | `d01c67e`，已 fast-forward 至 master |
 | fresh-clone 修复 | `0e3c912`，已 fast-forward 至 master；来源分支为 `codex/g0-fresh-clone-topology-20260811` |
 | G1 实施分支 | `codex/g1-contract-database-auth-20260812`；最终代码锚点 `4bfaaba` |
 | G2 实施分支 | `codex/g2-long-video-upload-playback-20260812`；最终代码验收锚点 `d08f6c6` |
-| G3 实施分支 | `codex/g3-moss-transcript-20260813`；基线提交 `0c3e2ee`（分支创建时的 `master`）；EchoFlow 代码锚点 `ca3e3ad` |
-| MOSS Provider 分支 | `codex/echoflow-provider-gateway-20260815`；代码锚点 `cdf6eb3` |
-| WIP | G3“MOSS 与完整字幕原子发布”仍是唯一核心纵向闭环；固定真实模型已完成 30 秒 CLI/Provider 冒烟与约 31 分钟的 5 分钟分片实验。不可变 replan/revision 已完成确定性验证；下一步是以该实现的提交锚点继续真实长媒体矩阵 |
+| G3 实施分支 | `codex/g3-moss-transcript-20260813`；基线提交 `0c3e2ee`（分支创建时的 `master`）；当前 EchoFlow 代码锚点 `8873c35` |
+| MOSS Provider 分支 | `codex/echoflow-provider-gateway-20260815`；当前输入范围校验锚点 `2f1c2ad`（Gateway 基线 `cdf6eb3`） |
+| WIP | G3“MOSS 与完整字幕原子发布”仍是唯一核心纵向闭环；固定真实模型已完成 30 秒 CLI/Provider 冒烟、约 31 分钟的 5 分钟分片实验，以及一次完整 5 分钟发布。不可变 replan/revision 已完成确定性验证；下一步是继续真实长媒体矩阵与故障恢复 |
 | 产品功能开发 | G2 已通过退出门；G3 实施中，G4–G5 继续冻结 |
 | Remote | `origin = https://github.com/suxun111/echoflow.git`；Private；外部恢复验证通过 |
-| 下一人工边界 | 以 bounded replan/revision 的提交锚点，使用真实 MOSS 从 5 分钟样本起，验证一次完整 EchoFlow Worker/对象存储/Provider 的重规划、严格合并和原子发布。未经该实证不得把 5/30/60/120 分钟矩阵或 G3 Gate 标记为通过 |
+| 下一人工边界 | 在已通过的 5 分钟锚点上，使用真实 MOSS 继续 30 分钟样本；如遇跨片歧义，验证一次有界 revision 1 repair 的真实发布或正确失败关闭。随后继续 60/120 分钟与故障恢复矩阵；未经这些实证不得关闭 G3 |
 
 ## 2026-08-11 决策澄清
 
@@ -101,11 +101,12 @@
 - 验证证据已提交为 `3514a4e` 并 fast-forward 至唯一 trunk，8 项退出条件全部成立；
 - 用户已确认开始 G3；[G3 任务合同](G3-TASK-CONTRACT.md) 冻结为当前实施与验收边界；
 - EchoFlow `ca3e3ad` 已采用 segment-first 契约并接入 `/api/provider/v1`；MOSS `cdf6eb3` 已实现独立 Bearer 网关、稳定幂等身份、代际 fencing、重启协调、不可变结果与持久 TTL。独立 Reviewer 对两个工作树均未发现 P0/P1；
-- [G3 本地验证证据](G3-LOCAL-VERIFICATION-EVIDENCE.md)记录了 EchoFlow 160 个通过测试、MOSS 52 个通过测试、真实 PostgreSQL/Redis/MinIO/FFmpeg、生产构建和 8002 隔离网关运行态复验；另有 4 个会自生成样本的 G2 长媒体回归测试因未设置 `RUN_G2_LONG_MEDIA=true` 而跳过；
+- [G3 本地验证证据](G3-LOCAL-VERIFICATION-EVIDENCE.md)记录了 EchoFlow 168 个通过测试、MOSS 52 个通过测试、真实 PostgreSQL/Redis/MinIO/FFmpeg、生产构建和隔离网关运行态复验；另有 4 个会自生成样本的 G2 长媒体回归测试因未设置 `RUN_G2_LONG_MEDIA=true` 而跳过；
 - 固定 revision 的真实 MOSS 已在 RTX 4060 Laptop GPU 上完成 30 秒英语 WAV 的 BF16 CLI 与隔离 Provider 冒烟：11 段、时间单调且无越界、同一幂等请求返回稳定外部任务身份；详细边界见 [G3 本地验证证据](G3-LOCAL-VERIFICATION-EVIDENCE.md)；
 - 2026-08-22 的真实约 31 分钟验证：整段单块真实 OOM、10 分钟单块在本机预算内未完成；6 个约 5 分钟 Provider 分片均结构合格，但真实 `buildTranscript` 在 segment-only handoff 处失败关闭。一次强静音边界 re-cut 消除了第 2→3 歧义，下一处仍失败，证明不能以随机静音重切或文本猜测替代不可变 replan 设计；详见 [G3 本地验证证据](G3-LOCAL-VERIFICATION-EVIDENCE.md)；
 - 2026-08-22 已实现有界不可变 replan/revision：只允许 `revision 0 → 1`、只替换歧义相邻 pair、旧分片/输入/ASR 结果/外部任务保持不可变，API/Outbox 仅按有效 overlay 计数、重试和取消。新迁移、真实 PostgreSQL 的 Fake MOSS/140 秒合成媒体回归、全仓 lint/test/build 与独立审查均通过；这只是确定性本地证据，不替代真实 MOSS 长媒体发布，详见 [G3 本地验证证据](G3-LOCAL-VERIFICATION-EVIDENCE.md)；
-- 真实模型层面目前只证明“真实 30 秒模型 + Provider 协议”，尚未调用 EchoFlow G3 API/Worker/对象存储形成完整字幕发布，也未完成 5/30/60/120 分钟矩阵、真实故障恢复或人工准确率基准，因此 G3 不关闭；
+- 2026-08-22 已用当前 `8873c35` 完成一次真实 5 分钟 EchoFlow G3 API/Worker/对象存储/Provider/严格合并/ACTIVE 字幕发布：3 个分片全部成功，规范化 WAV 为 `300002ms`，视频时间轴为 `300123ms`，71 个 Cue 均单调、非空且无越界。此次运行同时修复了视频容器时长略长于规范化 WAV 时 Provider 拒绝最后分片的问题；
+- 真实模型层面已证明“真实 30 秒模型 + Provider 协议 + 一次真实 5 分钟完整发布”，但未完成 30/60/120 分钟矩阵、真实故障恢复或人工准确率基准，因此 G3 不关闭；
 - G4 播放器、录音与进度以及 G5 生产发布继续冻结。
 
 ## G2 关闭证据
