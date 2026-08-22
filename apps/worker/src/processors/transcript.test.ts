@@ -1,6 +1,6 @@
 import { execFile, spawn, type ChildProcess } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
@@ -14,7 +14,7 @@ import type { MossAdapter } from '../moss/adapter'
 import { FakeMossAdapter } from '../moss/fake-adapter'
 import { enqueuePendingTranscriptCancellations, enqueueRecoverableTranscriptRuns } from '../outbox'
 import { G3_PIPELINE_VERSION } from '../transcript/constants'
-import { cancelExternalTranscriptJobs, createTranscriptProcessor, renewTranscriptRunLease } from './transcript'
+import { cancelExternalTranscriptJobs, createTranscriptProcessor, normalizedWavDurationMs, renewTranscriptRunLease } from './transcript'
 import { cleanupTranscriptObjects } from './transcript-cleanup'
 
 const execFileAsync = promisify(execFile)
@@ -156,6 +156,34 @@ describe('G3 real media pipeline with deterministic Fake MOSS', () => {
     expect(lesson.transcriptVersionId).toBe(transcript.id)
     expect(objects.map((object) => object.kind)).toEqual(expect.arrayContaining(['ORIGINAL', 'NORMALIZED_AUDIO', 'AUDIO_CHUNK', 'ASR_RAW']))
     expect(await processTranscript({ mediaAssetId: asset.id, processingRunId: run.id })).toEqual({ skipped: true })
+  }, 120_000)
+
+  it('caps each MOSS audio range to the measured normalized WAV duration when container metadata is slightly longer', async () => {
+    const { asset, run } = await createRun(longPath, 80_123, '28')
+    const processTranscript = createTranscriptProcessor({
+      database, storage, moss: new FakeMossAdapter(), env, workerId: 'g3-worker-audio-duration-cap',
+    })
+
+    await expect(processTranscript({ mediaAssetId: asset.id, processingRunId: run.id })).resolves.toMatchObject({ waiting: true })
+    const chunks = await database.processingChunk.findMany({
+      where: { processingRunId: run.id, planRevision: 0 }, orderBy: { chunkIndex: 'asc' },
+    })
+    expect(chunks).toHaveLength(2)
+    const normalized = await database.mediaObject.findFirstOrThrow({
+      where: { mediaAssetId: asset.id, kind: 'NORMALIZED_AUDIO', deletedAt: null },
+    })
+    const normalizedPath = join(directory, `${run.id}-normalized.wav`)
+    await storage.downloadFile(normalized.objectKey, normalizedPath, normalized.versionId)
+    const normalizedDurationMs = normalizedWavDurationMs(await readFile(normalizedPath))
+    expect(normalizedDurationMs).toBeGreaterThan(60_000)
+    expect(normalizedDurationMs).toBeLessThan(80_123)
+    expect((normalized.metadata as { normalizedAudioDurationMs?: number }).normalizedAudioDurationMs).toBe(normalizedDurationMs)
+
+    const last = chunks.at(-1)!
+    expect(last.endMs).toBeLessThanOrEqual(normalizedDurationMs)
+    const lastPath = join(directory, `${run.id}-last-chunk.wav`)
+    await storage.downloadFile(last.inputObjectKey, lastPath, last.inputVersionId)
+    expect(Math.abs(normalizedWavDurationMs(await readFile(lastPath)) - (last.endMs - last.startMs))).toBeLessThanOrEqual(50)
   }, 120_000)
 
   it('replans only an ambiguous adjacent pair as an immutable revision overlay before publishing', async () => {

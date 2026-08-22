@@ -129,6 +129,48 @@ async function runFfmpeg(ffmpegPath: string, args: string[], timeout: number) {
   }
 }
 
+export function normalizedWavDurationMs(bytes: Buffer) {
+  if (bytes.length < 12 || bytes.toString('ascii', 0, 4) !== 'RIFF' || bytes.toString('ascii', 8, 12) !== 'WAVE') {
+    throw new Error('normalized_audio_invalid_wav')
+  }
+  let offset = 12
+  let sampleRate = 0
+  let blockAlign = 0
+  let dataLength: number | null = null
+  while (offset + 8 <= bytes.length) {
+    const id = bytes.toString('ascii', offset, offset + 4)
+    const length = bytes.readUInt32LE(offset + 4)
+    const contentStart = offset + 8
+    const contentEnd = contentStart + length
+    if (contentEnd > bytes.length) throw new Error('normalized_audio_invalid_wav')
+    if (id === 'fmt ') {
+      if (length < 16) throw new Error('normalized_audio_invalid_wav')
+      const format = bytes.readUInt16LE(contentStart)
+      const channels = bytes.readUInt16LE(contentStart + 2)
+      sampleRate = bytes.readUInt32LE(contentStart + 4)
+      blockAlign = bytes.readUInt16LE(contentStart + 12)
+      const bitsPerSample = bytes.readUInt16LE(contentStart + 14)
+      if (format !== 1 || channels !== 1 || sampleRate !== 16_000 || blockAlign !== 2 || bitsPerSample !== 16) {
+        throw new Error('normalized_audio_unexpected_format')
+      }
+    } else if (id === 'data') {
+      dataLength = length
+    }
+    offset = contentEnd + (length % 2)
+  }
+  if (!sampleRate || !blockAlign || dataLength === null || dataLength <= 0 || dataLength % blockAlign !== 0) {
+    throw new Error('normalized_audio_invalid_wav')
+  }
+  return Math.round((dataLength / blockAlign) * 1000 / sampleRate)
+}
+
+export function chunkPlanDurationMs(mediaDurationMs: number, normalizedAudioDurationMs: number) {
+  if (!Number.isInteger(mediaDurationMs) || mediaDurationMs <= 0 || !Number.isInteger(normalizedAudioDurationMs) || normalizedAudioDurationMs <= 0) {
+    throw new Error('normalized_audio_duration_invalid')
+  }
+  return Math.min(mediaDurationMs, normalizedAudioDurationMs)
+}
+
 function retryAt(now: Date, attempt: number) {
   const base = Math.min(5 * 60_000, 1_000 * (2 ** Math.min(attempt, 8)))
   return new Date(now.getTime() + Math.round(base * (0.75 + Math.random() * 0.5)))
@@ -434,9 +476,9 @@ export function createTranscriptProcessor(options: TranscriptProcessorOptions) {
       objects: Array<{ id: string; objectKey: string; versionId: string | null; etag: string | null }>
     }
   }, directory: string) {
-    const durationMs = run.mediaAsset.durationMs
+    const mediaDurationMs = run.mediaAsset.durationMs
     const source = run.mediaAsset.objects[0]
-    if (!durationMs || !source) throw new Error('media_object_missing')
+    if (!mediaDurationMs || !source) throw new Error('media_object_missing')
     const existingChunks = await options.database.processingChunk.count({ where: { processingRunId: run.id, planRevision: 0 } })
     if (existingChunks > 0) {
       const resumed = await options.database.processingRun.updateMany({
@@ -484,9 +526,12 @@ export function createTranscriptProcessor(options: TranscriptProcessorOptions) {
         '-hide_banner', '-loglevel', 'error', '-i', sourcePath, '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', '-y', normalizedPath,
       ], 6 * 60 * 60_000)
     }
-    const normalizedChecksum = await checksum(await readFile(normalizedPath))
+    const normalizedBytes = await readFile(normalizedPath)
+    const normalizedChecksum = await checksum(normalizedBytes)
+    const normalizedAudioDurationMs = normalizedWavDurationMs(normalizedBytes)
+    const planDurationMs = chunkPlanDurationMs(mediaDurationMs, normalizedAudioDurationMs)
     await uploadTrackedObject(run.id, run.mediaAssetId, 'NORMALIZED_AUDIO', normalizedKey, normalizedPath, 'audio/wav', normalizedChecksum, {
-      processingRunId: run.id, sourceObjectId: source.id, expiresAfter: 'terminal+24h',
+      processingRunId: run.id, sourceObjectId: source.id, normalizedAudioDurationMs, expiresAfter: 'terminal+24h',
     })
 
     const chunking = await options.database.processingRun.updateMany({
@@ -501,7 +546,7 @@ export function createTranscriptProcessor(options: TranscriptProcessorOptions) {
       '-hide_banner', '-i', normalizedPath, '-af', 'silencedetect=noise=-35dB:d=0.5', '-f', 'null', '-',
     ], 6 * 60 * 60_000).then((output) => parseSilenceCenters(output.stderr)).catch(() => [])
     const plan = planAudioChunks(
-      durationMs,
+      planDurationMs,
       options.env.MOSS_CHUNK_TARGET_SECONDS * 1000,
       options.env.MOSS_CHUNK_OVERLAP_SECONDS * 1000,
       silence,
@@ -920,9 +965,12 @@ export function createTranscriptProcessor(options: TranscriptProcessorOptions) {
     })
     if (!normalized?.checksumSha256) return false
     const normalizedPath = join(directory, `repair-plan-${plan.activePlanRevision + 1}-normalized.wav`)
+    let repairPlanDurationMs: number
     try {
       await options.storage.downloadFile(normalized.objectKey, normalizedPath, normalized.versionId)
-      if (await checksum(await readFile(normalizedPath)) !== normalized.checksumSha256) return false
+      const normalizedBytes = await readFile(normalizedPath)
+      if (await checksum(normalizedBytes) !== normalized.checksumSha256) return false
+      repairPlanDurationMs = chunkPlanDurationMs(run.mediaAsset.durationMs, normalizedWavDurationMs(normalizedBytes))
     } catch (error) {
       if (isMissingObject(error)) return false
       throw error
@@ -934,7 +982,7 @@ export function createTranscriptProcessor(options: TranscriptProcessorOptions) {
     const repair = planBoundaryRepair(
       current.chunks.map((chunk) => ({ chunkIndex: chunk.chunkIndex, startMs: chunk.startMs, endMs: chunk.endMs })),
       diagnostic.previousChunkIndex,
-      run.mediaAsset.durationMs,
+      repairPlanDurationMs,
       options.env.MOSS_CHUNK_OVERLAP_SECONDS * 1000,
       silenceWindows,
     )
