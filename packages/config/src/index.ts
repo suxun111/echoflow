@@ -5,6 +5,7 @@ const BooleanStringSchema = z.enum(['true', 'false']).transform((value) => value
 export const ServerEnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   API_PORT: z.coerce.number().int().positive().max(65535).default(3001),
+  API_HOST: z.enum(['127.0.0.1', '::1']).default('127.0.0.1'),
   DATABASE_URL: z.string().url().startsWith('postgresql://'),
   REDIS_URL: z.string().url().default('redis://localhost:6379'),
   ACCESS_TOKEN_SECRET: z.string().min(32),

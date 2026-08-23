@@ -41,6 +41,7 @@ describe('server environment safety', () => {
     const env = loadServerEnv(valid)
     expect(env.MOSS_ENABLED).toBe(false)
     expect(env.MOSS_BASE_URL).toBeUndefined()
+    expect(env.API_HOST).toBe('127.0.0.1')
   })
 
   it('requires the complete MOSS trust boundary when enabled', () => {
