@@ -205,6 +205,161 @@ describe('EchoFlow real PostgreSQL, auth, upload and owner boundary', () => {
     })
   })
 
+  it('keeps a revision-1 strict handoff failure terminal, private and playback-capable', async () => {
+    const owner = await login('+8613800000026')
+    const other = await login('+8613800000027')
+    const internalSentinel = 'g3-terminal-internal-sentinel'
+    const hiddenObjectKey = 'private/g3-terminal/object-key-must-not-leak.mp4'
+    const asset = await database.mediaAsset.create({
+      data: {
+        ownerId: owner.user.id, title: 'Strict handoff terminal', originalName: 'strict-handoff-terminal.mp4',
+        status: 'PLAYABLE', durationMs: 6_000,
+      },
+    })
+    await database.processingRun.create({
+      data: {
+        ownerId: owner.user.id, mediaAssetId: asset.id, pipelineVersion: 'g2-playback-v1',
+        status: 'SUCCEEDED', stage: 'PLAYBACK_READY', completedAt: new Date(),
+      },
+    })
+    const transcriptRun = await database.processingRun.create({
+      data: {
+        ownerId: owner.user.id, mediaAssetId: asset.id, pipelineVersion: 'g3-transcript-v1',
+        status: 'FAILED', stage: 'MERGING', errorCode: 'transcript_incomplete', failedAt: new Date(),
+        activePlanRevision: 0, pendingPlanRevision: 1,
+        repairPlan: {
+          reasonCode: 'ambiguous_segment_handoff', previousChunkIndex: 2, nextChunkIndex: 3,
+          internalNote: internalSentinel,
+        },
+        errorDetail: { message: internalSentinel, objectKey: hiddenObjectKey },
+      },
+    })
+    await database.mediaObject.create({
+      data: {
+        mediaAssetId: asset.id, kind: 'PLAYBACK', bucket: 'test', objectKey: hiddenObjectKey,
+        contentType: 'video/mp4', sizeBytes: 1n,
+      },
+    })
+
+    const revisionZeroChunks = Array.from({ length: 6 }, (_, chunkIndex) => ({
+      processingRunId: transcriptRun.id, planRevision: 0, chunkIndex,
+      startMs: chunkIndex * 1_000, endMs: (chunkIndex + 1) * 1_000,
+      status: 'SUCCEEDED' as const, idempotencyKey: `g3-terminal:${transcriptRun.id}:0:${chunkIndex}`,
+      modelVersion: 'fake-moss', inputObjectKey: `private/g3-terminal/r0-${chunkIndex}.wav`,
+      inputVersionId: `r0-input-${chunkIndex}`, inputChecksum: String(chunkIndex).repeat(64),
+      resultObjectKey: `private/g3-terminal/r0-${chunkIndex}.json`, completedAt: new Date(),
+    }))
+    const revisionOneOverlay = [2, 3].map((chunkIndex) => ({
+      processingRunId: transcriptRun.id, planRevision: 1, chunkIndex,
+      startMs: chunkIndex * 1_000 - 50, endMs: (chunkIndex + 1) * 1_000 + 50,
+      status: 'SUCCEEDED' as const, idempotencyKey: `g3-terminal:${transcriptRun.id}:1:${chunkIndex}`,
+      modelVersion: 'fake-moss', inputObjectKey: `private/g3-terminal/r1-${chunkIndex}.wav`,
+      inputVersionId: `r1-input-${chunkIndex}`, inputChecksum: String(chunkIndex).repeat(64),
+      resultObjectKey: `private/g3-terminal/r1-${chunkIndex}.json`, completedAt: new Date(),
+    }))
+    await database.processingChunk.createMany({ data: [...revisionZeroChunks, ...revisionOneOverlay] })
+    await database.outboxEvent.create({
+      data: {
+        aggregateType: 'ProcessingRun', aggregateId: transcriptRun.id, eventType: 'media.transcript_requested',
+        idempotencyKey: `g3-terminal-seed:${transcriptRun.id}`,
+        payload: { processingRunId: transcriptRun.id, internalSentinel, objectKey: hiddenObjectKey },
+      },
+    })
+
+    const assertNoInternalState = (body: unknown) => {
+      const serialized = JSON.stringify(body)
+      expect(serialized).not.toContain(internalSentinel)
+      expect(serialized).not.toContain(hiddenObjectKey)
+      expect(serialized).not.toContain('errorDetail')
+      expect(serialized).not.toContain('repairPlan')
+    }
+    const assertFailedView = (body: Record<string, unknown>) => {
+      expect(body).toMatchObject({
+        id: asset.id, status: 'playable', processingStage: 'playback_ready', errorCode: null,
+        transcriptProcessing: {
+          status: 'failed', stage: 'merging', completedChunks: 6, totalChunks: 6,
+          errorCode: 'transcript_incomplete',
+        },
+      })
+      expect(body).not.toHaveProperty('errorDetail')
+      expect(body).not.toHaveProperty('repairPlan')
+      assertNoInternalState(body)
+    }
+
+    const listed = await request(app.getHttpServer())
+      .get('/api/v1/media-assets')
+      .set('authorization', `Bearer ${owner.accessToken}`)
+      .expect(200)
+    const listedAsset = listed.body.items.find((item: { id: string }) => item.id === asset.id)
+    expect(listedAsset).toBeTruthy()
+    assertFailedView(listedAsset)
+    assertNoInternalState(listed.body)
+
+    const detail = await request(app.getHttpServer())
+      .get(`/api/v1/media-assets/${asset.id}`)
+      .set('authorization', `Bearer ${owner.accessToken}`)
+      .expect(200)
+    assertFailedView(detail.body)
+
+    const playback = await request(app.getHttpServer())
+      .post(`/api/v1/media-assets/${asset.id}/playback-url`)
+      .set('authorization', `Bearer ${owner.accessToken}`)
+      .expect(201)
+    expect(playback.body).toMatchObject({ mediaAssetId: asset.id })
+    expect(playback.body.playbackUrl).toEqual(expect.any(String))
+    expect(playback.body).not.toHaveProperty('objectKey')
+    expect(playback.body).not.toHaveProperty('errorDetail')
+    expect(playback.body).not.toHaveProperty('repairPlan')
+
+    const notReady = await request(app.getHttpServer())
+      .get(`/api/v1/media-assets/${asset.id}/transcript`)
+      .set('authorization', `Bearer ${owner.accessToken}`)
+      .expect(409)
+    expect(notReady.body).toMatchObject({ code: 'transcript_not_ready' })
+    assertNoInternalState(notReady.body)
+    const denied = await request(app.getHttpServer())
+      .get(`/api/v1/media-assets/${asset.id}/transcript`)
+      .set('authorization', `Bearer ${other.accessToken}`)
+      .expect(404)
+    expect(denied.body).toMatchObject({ code: 'not_found' })
+    assertNoInternalState(denied.body)
+
+    const readTerminalState = async () => ({
+      run: await database.processingRun.findUniqueOrThrow({
+        where: { id: transcriptRun.id },
+        select: {
+          id: true, status: true, stage: true, attempt: true, errorCode: true,
+          activePlanRevision: true, pendingPlanRevision: true, repairPlan: true, errorDetail: true,
+        },
+      }),
+      chunks: await database.processingChunk.findMany({
+        where: { processingRunId: transcriptRun.id },
+        orderBy: [{ planRevision: 'asc' }, { chunkIndex: 'asc' }],
+        select: {
+          id: true, planRevision: true, chunkIndex: true, status: true, attempt: true, errorCode: true,
+          inputObjectKey: true, inputVersionId: true, resultObjectKey: true,
+        },
+      }),
+      outbox: await database.outboxEvent.findMany({
+        where: { aggregateId: transcriptRun.id }, orderBy: { id: 'asc' },
+        select: { id: true, eventType: true, idempotencyKey: true, payload: true, status: true, attempts: true },
+      }),
+    })
+    const beforeRetry = await readTerminalState()
+    expect(await database.processingChunk.count({ where: { processingRunId: transcriptRun.id, planRevision: 2 } })).toBe(0)
+
+    const retry = await request(app.getHttpServer())
+      .post(`/api/v1/media-assets/${asset.id}/transcript/retry`)
+      .set('authorization', `Bearer ${owner.accessToken}`)
+      .set('idempotency-key', 'g3-terminal-retry-1234')
+      .expect(422)
+    expect(retry.body).toMatchObject({ code: 'moss_rejected' })
+    assertNoInternalState(retry.body)
+
+    expect(await readTerminalState()).toEqual(beforeRetry)
+    expect(await database.processingChunk.count({ where: { processingRunId: transcriptRun.id, planRevision: 2 } })).toBe(0)
+  })
+
   it('preserves a G2 media format failure without inventing transcript state', async () => {
     const owner = await login('+8613800000098')
     const asset = await database.mediaAsset.create({

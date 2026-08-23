@@ -11,7 +11,7 @@ import type { MultipartStorageProvider, StoredObject } from '@online-learning/st
 import { MossError, type MossAdapter, type MossResult } from '../moss/adapter'
 import { parseSilenceCenters, parseSilenceWindows, planAudioChunks, planBoundaryRepair } from '../transcript/chunks'
 import { G3_PIPELINE_VERSION } from '../transcript/constants'
-import { buildTranscript, TranscriptValidationError } from '../transcript/merge'
+import { buildTranscript, TranscriptValidationError, type TranscriptRepairDiagnostic } from '../transcript/merge'
 
 const execFileAsync = promisify(execFile)
 const noProxyEnvironment = {
@@ -23,6 +23,37 @@ const MAX_AUTOMATIC_PLAN_REVISIONS = 1
 export type TranscriptJob = { mediaAssetId: string; processingRunId: string }
 
 class TranscriptLeaseLostError extends Error {}
+
+type BoundaryRepairDecision =
+  | 'created'
+  | 'blocked_pending_revision'
+  | 'blocked_revision_limit'
+  | 'no_eligible_silence_boundary'
+  | 'repair_precondition_unavailable'
+
+type G3MergeFailureDiagnosticV1 = {
+  schemaVersion: 1
+  source: 'strict_segment_merge'
+  errorCode: 'transcript_incomplete'
+  evaluatedPlanRevision: number
+  handoff: TranscriptRepairDiagnostic
+  repair: {
+    maximumAutomaticRevisions: number
+    activePlanRevision: number
+    pendingPlanRevision: number | null
+    decision: Exclude<BoundaryRepairDecision, 'created'>
+  }
+}
+
+class TranscriptMergeFailureError extends TranscriptValidationError {
+  constructor(
+    error: TranscriptValidationError,
+    readonly mergeFailureDiagnostic: G3MergeFailureDiagnosticV1,
+  ) {
+    super(error.code, error.message, error.repairDiagnostic)
+    this.name = 'TranscriptMergeFailureError'
+  }
+}
 
 export function renewTranscriptRunLease(
   database: PrismaClient,
@@ -942,18 +973,19 @@ export function createTranscriptProcessor(options: TranscriptProcessorOptions) {
       }
     },
     directory: string,
-    diagnostic: { kind: 'ambiguous_segment_handoff'; previousChunkIndex: number; nextChunkIndex: number },
-  ) {
+    diagnostic: TranscriptRepairDiagnostic,
+  ): Promise<BoundaryRepairDecision> {
     const plan = await currentPlan(run.id)
-    if (plan.pendingPlanRevision !== null || plan.activePlanRevision >= MAX_AUTOMATIC_PLAN_REVISIONS) return false
-    if (!run.mediaAsset.durationMs) return false
+    if (plan.pendingPlanRevision !== null) return 'blocked_pending_revision'
+    if (plan.activePlanRevision >= MAX_AUTOMATIC_PLAN_REVISIONS) return 'blocked_revision_limit'
+    if (!run.mediaAsset.durationMs) return 'repair_precondition_unavailable'
     const current = await currentPlanChunks(run.id)
-    if (current.revision !== plan.activePlanRevision) return false
+    if (current.revision !== plan.activePlanRevision) return 'repair_precondition_unavailable'
     const previous = current.chunks.find((chunk) => chunk.chunkIndex === diagnostic.previousChunkIndex)
     const next = current.chunks.find((chunk) => chunk.chunkIndex === diagnostic.nextChunkIndex)
-    if (!previous || !next || next.chunkIndex !== previous.chunkIndex + 1) return false
+    if (!previous || !next || next.chunkIndex !== previous.chunkIndex + 1) return 'repair_precondition_unavailable'
     const modelVersions = new Set(current.chunks.map((chunk) => chunk.modelVersion))
-    if (modelVersions.size !== 1) return false
+    if (modelVersions.size !== 1) return 'repair_precondition_unavailable'
     const modelVersion = [...modelVersions][0]
 
     const normalized = await options.database.mediaObject.findFirst({
@@ -963,16 +995,16 @@ export function createTranscriptProcessor(options: TranscriptProcessorOptions) {
       },
       orderBy: { createdAt: 'desc' },
     })
-    if (!normalized?.checksumSha256) return false
+    if (!normalized?.checksumSha256) return 'repair_precondition_unavailable'
     const normalizedPath = join(directory, `repair-plan-${plan.activePlanRevision + 1}-normalized.wav`)
     let repairPlanDurationMs: number
     try {
       await options.storage.downloadFile(normalized.objectKey, normalizedPath, normalized.versionId)
       const normalizedBytes = await readFile(normalizedPath)
-      if (await checksum(normalizedBytes) !== normalized.checksumSha256) return false
+      if (await checksum(normalizedBytes) !== normalized.checksumSha256) return 'repair_precondition_unavailable'
       repairPlanDurationMs = chunkPlanDurationMs(run.mediaAsset.durationMs, normalizedWavDurationMs(normalizedBytes))
     } catch (error) {
-      if (isMissingObject(error)) return false
+      if (isMissingObject(error)) return 'repair_precondition_unavailable'
       throw error
     }
 
@@ -986,10 +1018,10 @@ export function createTranscriptProcessor(options: TranscriptProcessorOptions) {
       options.env.MOSS_CHUNK_OVERLAP_SECONDS * 1000,
       silenceWindows,
     )
-    if (!repair) return false
+    if (!repair) return 'no_eligible_silence_boundary'
     const nextRevision = plan.activePlanRevision + 1
     const source = run.mediaAsset.objects[0]
-    if (!source) return false
+    if (!source) return 'repair_precondition_unavailable'
     const sourceVersion = source.versionId ?? source.etag ?? source.id
     const uploaded: Array<{
       plan: (typeof repair.replacementChunks)[number]
@@ -1052,7 +1084,7 @@ export function createTranscriptProcessor(options: TranscriptProcessorOptions) {
       return true
     }, { maxWait: 10_000, timeout: 60_000 })
     if (!activated) throw new TranscriptLeaseLostError('transcript_repair_fence_lost')
-    return true
+    return 'created'
   }
 
   async function publish(run: {
@@ -1085,9 +1117,22 @@ export function createTranscriptProcessor(options: TranscriptProcessorOptions) {
     try {
       transcriptResult = buildTranscript(results, run.mediaAsset.durationMs)
     } catch (error) {
-      if (error instanceof TranscriptValidationError && error.repairDiagnostic
-        && await attemptBoundaryRepair(run, directory, error.repairDiagnostic)) {
-        return { replanned: true }
+      if (error instanceof TranscriptValidationError && error.repairDiagnostic) {
+        const repairDecision = await attemptBoundaryRepair(run, directory, error.repairDiagnostic)
+        if (repairDecision === 'created') return { replanned: true }
+        throw new TranscriptMergeFailureError(error, {
+          schemaVersion: 1,
+          source: 'strict_segment_merge',
+          errorCode: 'transcript_incomplete',
+          evaluatedPlanRevision: plan.revision,
+          handoff: error.repairDiagnostic,
+          repair: {
+            maximumAutomaticRevisions: MAX_AUTOMATIC_PLAN_REVISIONS,
+            activePlanRevision: plan.activePlanRevision,
+            pendingPlanRevision: plan.pendingPlanRevision,
+            decision: repairDecision,
+          },
+        })
       }
       throw error
     }
@@ -1223,6 +1268,9 @@ export function createTranscriptProcessor(options: TranscriptProcessorOptions) {
             : 'audio_extract_failed'
       const attempt = (current?.attempt ?? 0) + 1
       const terminal = error instanceof TranscriptValidationError || attempt >= options.env.MOSS_MAX_ATTEMPTS
+      const errorDetail = error instanceof TranscriptMergeFailureError
+        ? { g3MergeFailureDiagnostic: error.mergeFailureDiagnostic }
+        : { message: error instanceof Error ? error.message.slice(0, 500) : 'unknown' }
       if (!current?.leaseExpiresAt || current.leaseExpiresAt.getTime() <= now().getTime()) {
         return { skipped: true, leaseLost: true }
       }
@@ -1232,11 +1280,11 @@ export function createTranscriptProcessor(options: TranscriptProcessorOptions) {
           status: 'PROCESSING', leaseOwner: leaseOwner(), leaseExpiresAt: { gt: now() },
         },
         data: terminal ? {
-          status: 'FAILED', failedAt: now(), errorCode: code, errorDetail: { message: error instanceof Error ? error.message.slice(0, 500) : 'unknown' },
+          status: 'FAILED', failedAt: now(), errorCode: code, errorDetail,
           leaseOwner: null, leaseExpiresAt: null, attempt,
         } : {
           status: 'QUEUED', stage: current?.stage ?? 'PLAYBACK_READY', errorCode: code, attempt,
-          errorDetail: { message: error instanceof Error ? error.message.slice(0, 500) : 'unknown' }, leaseOwner: null, leaseExpiresAt: null,
+          errorDetail, leaseOwner: null, leaseExpiresAt: null,
         },
       })
       if (!terminal) throw error

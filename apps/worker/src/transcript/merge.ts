@@ -20,6 +20,23 @@ export type TranscriptRepairDiagnostic = {
   kind: 'ambiguous_segment_handoff'
   previousChunkIndex: number
   nextChunkIndex: number
+  overlapStartMs: number
+  overlapEndMs: number
+  overlapDurationMs: number
+  previousBoundarySegmentCount: number
+  nextBoundarySegmentCount: number
+  previousBoundaryTokenCount: number
+  nextBoundaryTokenCount: number
+  textOnlyCandidateCount: number
+  timeCompatibleCandidateCount: number
+  speakerCompatibleCandidateCount: number
+  maximumCandidateTokenCount: number
+  failureClass:
+    | 'no_textual_suffix_prefix'
+    | 'text_match_without_time_overlap'
+    | 'text_time_match_with_speaker_conflict'
+    | 'multiple_valid_alignments'
+    | 'weak_single_token_alignment'
 }
 
 export class TranscriptValidationError extends Error {
@@ -136,6 +153,18 @@ function normalizeChunkSegments(chunk: ChunkResult): AbsoluteSegment[] {
 type TextToken = { raw: string; normalized: string }
 type TimedTextToken = TextToken & { startMs: number; endMs: number; speaker?: string }
 
+type SegmentHandoffEvidence = Omit<
+  TranscriptRepairDiagnostic,
+  'kind' | 'previousChunkIndex' | 'nextChunkIndex' | 'overlapStartMs' | 'overlapEndMs' | 'overlapDurationMs'
+>
+
+class SegmentHandoffAmbiguityError extends Error {
+  constructor(readonly evidence: SegmentHandoffEvidence) {
+    super('overlapped chunks have ambiguous segment text at the handoff boundary')
+    this.name = 'SegmentHandoffAmbiguityError'
+  }
+}
+
 function textTokens(text: string): TextToken[] {
   return text.split(/\s+/).map((raw) => ({ raw, normalized: token(raw) })).filter((part) => part.normalized !== '')
 }
@@ -153,23 +182,46 @@ function mergeBoundaryText(previousSegments: AbsoluteSegment[], nextSegments: Ab
   const previous = timedTextTokens(previousSegments)
   const next = timedTextTokens(nextSegments)
   const limit = Math.min(previous.length, next.length)
-  const candidates: number[] = []
+  const textOnlyCandidates: number[] = []
+  const timeCompatibleCandidates: number[] = []
+  const speakerCompatibleCandidates: number[] = []
   for (let size = limit; size > 0; size -= 1) {
-    if (previous.slice(-size).every((part, index) => (
-      part.normalized === next[index].normalized
-      && Math.max(part.startMs, next[index].startMs) < Math.min(part.endMs, next[index].endMs)
-      && (!part.speaker || !next[index].speaker || part.speaker === next[index].speaker)
-    ))) {
-      candidates.push(size)
-    }
+    const suffix = previous.slice(-size)
+    const prefix = next.slice(0, size)
+    if (!suffix.every((part, index) => part.normalized === prefix[index].normalized)) continue
+    textOnlyCandidates.push(size)
+    if (!suffix.every((part, index) => (
+      Math.max(part.startMs, prefix[index].startMs) < Math.min(part.endMs, prefix[index].endMs)
+    ))) continue
+    timeCompatibleCandidates.push(size)
+    if (!suffix.every((part, index) => (
+      !part.speaker || !prefix[index].speaker || part.speaker === prefix[index].speaker
+    ))) continue
+    speakerCompatibleCandidates.push(size)
   }
-  const overlap = candidates.length === 1 ? candidates[0] : 0
+  const overlap = speakerCompatibleCandidates.length === 1 ? speakerCompatibleCandidates[0] : 0
   const overlapIsStrong = overlap >= 2 || overlap === previous.length || overlap === next.length
   if (!overlapIsStrong) {
-    throw new TranscriptValidationError(
-      'transcript_incomplete',
-      'overlapped chunks have ambiguous segment text at the handoff boundary',
-    )
+    const failureClass = textOnlyCandidates.length === 0
+      ? 'no_textual_suffix_prefix'
+      : timeCompatibleCandidates.length === 0
+        ? 'text_match_without_time_overlap'
+        : speakerCompatibleCandidates.length === 0
+          ? 'text_time_match_with_speaker_conflict'
+          : speakerCompatibleCandidates.length > 1
+            ? 'multiple_valid_alignments'
+            : 'weak_single_token_alignment'
+    throw new SegmentHandoffAmbiguityError({
+      previousBoundarySegmentCount: previousSegments.length,
+      nextBoundarySegmentCount: nextSegments.length,
+      previousBoundaryTokenCount: previous.length,
+      nextBoundaryTokenCount: next.length,
+      textOnlyCandidateCount: textOnlyCandidates.length,
+      timeCompatibleCandidateCount: timeCompatibleCandidates.length,
+      speakerCompatibleCandidateCount: speakerCompatibleCandidates.length,
+      maximumCandidateTokenCount: speakerCompatibleCandidates[0] ?? 0,
+      failureClass,
+    })
   }
   const tail = next.slice(overlap).map((part) => part.raw).join(' ')
   if (!tail) return previousText.trim()
@@ -239,13 +291,15 @@ function mergeSegmentResults(chunks: ChunkResult[], durationMs: number): Absolut
         previousChunk.endMs,
       )
     } catch (error) {
-      if (error instanceof TranscriptValidationError
-        && error.code === 'transcript_incomplete'
-        && error.message === 'overlapped chunks have ambiguous segment text at the handoff boundary') {
-        throw new TranscriptValidationError(error.code, error.message, {
+      if (error instanceof SegmentHandoffAmbiguityError) {
+        throw new TranscriptValidationError('transcript_incomplete', error.message, {
           kind: 'ambiguous_segment_handoff',
           previousChunkIndex: previousChunk.chunkIndex,
           nextChunkIndex: chunk.chunkIndex,
+          overlapStartMs: chunk.startMs,
+          overlapEndMs: previousChunk.endMs,
+          overlapDurationMs: previousChunk.endMs - chunk.startMs,
+          ...error.evidence,
         })
       }
       throw error

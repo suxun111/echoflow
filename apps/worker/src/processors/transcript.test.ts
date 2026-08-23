@@ -327,6 +327,13 @@ describe('G3 real media pipeline with deterministic Fake MOSS', () => {
     })
     await expect(processTranscript({ mediaAssetId: asset.id, processingRunId: run.id }))
       .resolves.toMatchObject({ waiting: true, replanned: true })
+    const immutableRevisionZero = (await database.processingChunk.findMany({
+      where: { processingRunId: run.id, planRevision: 0 }, orderBy: { chunkIndex: 'asc' },
+      select: {
+        id: true, chunkIndex: true, inputObjectKey: true, inputVersionId: true, inputChecksum: true,
+        externalJobId: true, resultObjectKey: true, resultVersionId: true, resultChecksum: true,
+      },
+    })).map((chunk) => ({ ...chunk }))
 
     await processTranscript({ mediaAssetId: asset.id, processingRunId: run.id })
     const revisionOne = await database.processingChunk.findMany({
@@ -344,11 +351,69 @@ describe('G3 real media pipeline with deterministic Fake MOSS', () => {
 
     await expect(processTranscript({ mediaAssetId: asset.id, processingRunId: run.id }))
       .resolves.toMatchObject({ failed: true, errorCode: 'transcript_incomplete' })
-    expect(await database.processingRun.findUniqueOrThrow({ where: { id: run.id } })).toMatchObject({
-      status: 'FAILED', errorCode: 'transcript_incomplete', activePlanRevision: 0, pendingPlanRevision: 1,
+    const [failedRun, failedAsset, finalRevisionZero, finalRevisionOne] = await Promise.all([
+      database.processingRun.findUniqueOrThrow({ where: { id: run.id } }),
+      database.mediaAsset.findUniqueOrThrow({ where: { id: asset.id } }),
+      database.processingChunk.findMany({
+        where: { processingRunId: run.id, planRevision: 0 }, orderBy: { chunkIndex: 'asc' },
+        select: {
+          id: true, chunkIndex: true, inputObjectKey: true, inputVersionId: true, inputChecksum: true,
+          externalJobId: true, resultObjectKey: true, resultVersionId: true, resultChecksum: true,
+        },
+      }),
+      database.processingChunk.findMany({
+        where: { processingRunId: run.id, planRevision: 1 }, orderBy: { chunkIndex: 'asc' },
+      }),
+    ])
+    expect(failedRun).toMatchObject({
+      status: 'FAILED', stage: 'MERGING', errorCode: 'transcript_incomplete', activePlanRevision: 0, pendingPlanRevision: 1,
+      completedAt: null, leaseOwner: null, leaseExpiresAt: null,
     })
+    expect(failedRun.failedAt).toBeInstanceOf(Date)
+    const errorDetail = failedRun.errorDetail as {
+      g3MergeFailureDiagnostic: { handoff: Record<string, unknown>; repair: Record<string, unknown> }
+    }
+    const diagnostic = errorDetail.g3MergeFailureDiagnostic
+    expect(Object.keys(errorDetail).sort()).toEqual(['g3MergeFailureDiagnostic'])
+    expect(Object.keys(diagnostic).sort()).toEqual([
+      'errorCode', 'evaluatedPlanRevision', 'handoff', 'repair', 'schemaVersion', 'source',
+    ])
+    expect(Object.keys(diagnostic.handoff).sort()).toEqual([
+      'failureClass', 'kind', 'maximumCandidateTokenCount', 'nextBoundarySegmentCount', 'nextBoundaryTokenCount',
+      'nextChunkIndex', 'overlapDurationMs', 'overlapEndMs', 'overlapStartMs', 'previousBoundarySegmentCount',
+      'previousBoundaryTokenCount', 'previousChunkIndex', 'speakerCompatibleCandidateCount',
+      'textOnlyCandidateCount', 'timeCompatibleCandidateCount',
+    ])
+    expect(Object.keys(diagnostic.repair).sort()).toEqual([
+      'activePlanRevision', 'decision', 'maximumAutomaticRevisions', 'pendingPlanRevision',
+    ])
+    expect(diagnostic).toMatchObject({
+      schemaVersion: 1,
+      source: 'strict_segment_merge',
+      errorCode: 'transcript_incomplete',
+      evaluatedPlanRevision: 1,
+      handoff: {
+        kind: 'ambiguous_segment_handoff', previousChunkIndex: 0, nextChunkIndex: 1,
+        textOnlyCandidateCount: 0, timeCompatibleCandidateCount: 0, speakerCompatibleCandidateCount: 0,
+        maximumCandidateTokenCount: 0, failureClass: 'no_textual_suffix_prefix',
+      },
+      repair: {
+        maximumAutomaticRevisions: 1,
+        activePlanRevision: 0,
+        pendingPlanRevision: 1,
+        decision: 'blocked_pending_revision',
+      },
+    })
+    expect(JSON.stringify(failedRun.errorDetail)).not.toContain('Still first mismatch.')
+    expect(JSON.stringify(failedRun.errorDetail)).not.toContain('Still second mismatch.')
+    expect(finalRevisionZero).toEqual(immutableRevisionZero)
+    expect(finalRevisionOne).toHaveLength(2)
+    expect(finalRevisionOne.every((chunk) => chunk.status === 'SUCCEEDED')).toBe(true)
     expect(await database.processingChunk.count({ where: { processingRunId: run.id, planRevision: 2 } })).toBe(0)
-    expect(await database.transcriptVersion.count({ where: { mediaAssetId: asset.id, status: 'ACTIVE' } })).toBe(0)
+    expect(await database.transcriptVersion.count({ where: { mediaAssetId: asset.id } })).toBe(0)
+    expect(await database.subtitleCue.count()).toBe(0)
+    expect(await database.privateLesson.count({ where: { mediaAssetId: asset.id } })).toBe(0)
+    expect(failedAsset.status).toBe('PLAYABLE')
   }, 240_000)
 
   it('keeps the transcript invisible when one required chunk fails', async () => {

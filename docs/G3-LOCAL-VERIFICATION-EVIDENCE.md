@@ -224,7 +224,41 @@ MOSS 代码锚点仍为 `cdf6eb32f12f593121b669cddf609db7f4215131`，本轮没�
 - 观察期间出现过一次 `500 / internal_error`；该次事件后下一次 owner-scoped 读取成功，且**当时**数据库 Run 尚未进入失败态。终态仍为 `FAILED / MERGING / transcript_incomplete`。为避免读取私人转写/对象日志，本轮没有对该单次 API 事件作根因归因；它不是“API 通过”的证据，应作为后续可复现诊断项。
 - 本节证明真实约 31 分钟链路的 **正确失败关闭**、真实 revision 1 触发和原子不发布；它不证明 30 分钟成功发布、字幕准确率、逐词时间、60/120 分钟、真实故障恢复、权限/回调攻击矩阵或 G3 关闭。
 
-## 11. 仍然阻塞 G3 的外部证据
+## 11. revision 1 严格合并失败的隐私安全诊断合同（2026-08-23）
+
+### 11.1 目标与范围
+
+第 10 节的真实约 31 分钟任务证明了正确失败关闭，但当时持久化的失败信息只包含通用消息，不能在不读取私人字幕正文的前提下判断 revision 1 失败的具体证据类型。本节只为**后续**严格 segment handoff 失败建立内部诊断和回归合同：不重跑既有私人样本、不读取其对象或日志、不放宽合并规则、不创建 revision 2，也不向公开 API 增加诊断字段。
+
+### 11.2 持久化合同
+
+仅当严格 segment handoff 失败且本次未成功创建新的 repair 时，`ProcessingRun.errorDetail.g3MergeFailureDiagnostic` 写入 `schemaVersion: 1` 的白名单对象。字段只包括：
+
+- `failureClass`：`no_textual_suffix_prefix`、`text_match_without_time_overlap`、`text_time_match_with_speaker_conflict`、`multiple_valid_alignments` 或 `weak_single_token_alignment`；
+- 候选计数、最大候选 token 数、边界 segment/token 计数、重叠窗口毫秒数和相邻 chunk index；
+- 被评估的 plan revision，以及 repair 的 active/pending revision 和决策枚举。
+
+该对象不包含字幕正文、token、speaker 标签、对象键、版本 ID、UUID、URL 或原始错误消息。`ProcessingRun.repairPlan` 仍只记录第一次 repair 的结构事实；两者可联合判断“首次 repair 的 pair”与“最终失败的 pair”是否一致。公开媒体列表、详情、字幕和重试 API 保持既有响应契约，不暴露 `errorDetail` 或 `repairPlan`。
+
+### 11.3 确定性验证
+
+| 命令/检查 | 结果 | 证明的边界 |
+|---|---|---|
+| `pnpm --filter @online-learning/worker exec vitest run src/transcript/merge.test.ts src/processors/transcript.test.ts` | 49 passed | 五类 handoff 失败均产生仅含结构字段的分类；合成 140 秒媒体 + Fake MOSS 仍严格执行 revision `0 → 1 → FAILED`，无 revision 2、无任何 TranscriptVersion/Cue/Lesson 发布 |
+| `pnpm --filter @online-learning/worker lint` | 通过 | Worker 类型检查通过 |
+| `pnpm --filter @online-learning/api test -- app.e2e.test.ts` | 19 passed | 有效 overlay 仍以 `6/6` 投影；播放可用、字幕 owner `409`/他人 `404`、retry `422` 且 Run/Chunk/Outbox 不变；内部 sentinel 和对象键不出现在状态/错误 API 响应中 |
+| `pnpm --filter @online-learning/api lint` | 通过 | API 类型检查通过 |
+| `pnpm lint` | 通过 | 当前全仓 TypeScript 静态检查；包含 API/Worker 新增测试源码 |
+| `pnpm test` | 171 passed，4 skipped | 当前全仓回归；4 个既有长媒体矩阵用例仍由显式开关跳过，未作为通过依据 |
+| `pnpm build` | 通过 | 当前全仓生产构建 |
+
+这是合成/种子测试的代码证据，不是新的真实 MOSS 长媒体成功证据。此前真实任务发生在该诊断合同之前，不能仅靠新的枚举对其做追溯性分类。
+
+### 11.4 下一恢复点
+
+下一次必须由用户选择新的受权真实样本或批准经审查的 repair 设计；新失败才可读取该白名单诊断，再决定下一步。不得自动重跑既有私人输入，不得把所有 chunk `SUCCEEDED` 误写为字幕已发布，也不得通过自动 revision 2 或文本猜测绕过严格合并。
+
+## 12. 仍然阻塞 G3 的外部证据
 
 以下任一项不能由 Fake MOSS 或测试数量替代：
 
