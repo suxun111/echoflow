@@ -1,6 +1,6 @@
 # EchoFlow G3 本地实现验证证据
 
-验证日期：2026-08-16；真实 30 秒补充验证：2026-08-21；真实 31 分钟分片验证、不可变 replan/revision 确定性验证与真实 5 分钟完整发布：2026-08-22
+验证日期：2026-08-16；真实 30 秒补充验证：2026-08-21；真实 31 分钟分片验证、不可变 replan/revision 确定性验证与真实 5 分钟完整发布：2026-08-22；真实约 31 分钟完整链路受控失败关闭：2026-08-23
 
 实施分支：`codex/g3-moss-transcript-20260813`
 
@@ -12,7 +12,7 @@ EchoFlow 代码验收锚点：`ca3e3ad00cdb54a5e32d1ce614db433b3c9d50e9`；本�
 
 MOSS Provider Gateway 锚点：`cdf6eb32f12f593121b669cddf609db7f4215131`；输入范围校验锚点：`2f1c2ad`
 
-状态：本地实现候选、真实 30 秒 MOSS 冒烟、不可变 replan/revision 确定性验证与一次真实 5 分钟 EchoFlow → MOSS → ACTIVE 字幕发布均通过。真实约 31 分钟分片验证仍有受控跨片歧义，且 30/60/120 分钟及故障恢复矩阵未完成，G3 Gate 保持打开
+状态：本地实现候选、真实 30 秒 MOSS 冒烟、不可变 replan/revision 确定性验证与一次真实 5 分钟 EchoFlow → MOSS → ACTIVE 字幕发布均通过。2026-08-23 的真实约 31 分钟完整链路在唯一 revision 1 repair 后正确失败关闭、没有 ACTIVE 字幕；成功的 30/60/120 分钟及故障恢复矩阵仍未完成，G3 Gate 保持打开
 
 ## 1. 结论
 
@@ -184,11 +184,51 @@ MOSS 代码锚点仍为 `cdf6eb32f12f593121b669cddf609db7f4215131`，本轮没�
 
 本次证明一次真实 5 分钟闭环，不证明 30/60/120 分钟可稳定发布，不证明跨片歧义一定可由一次 repair 消除，也不证明 MOSS/Worker 重启、轮询丢失、429/503、超时、取消或人工准确率基准已通过。
 
-## 10. 仍然阻塞 G3 的外部证据
+## 10. 真实约 31 分钟 EchoFlow → MOSS → 受控失败关闭（2026-08-23）
+
+本节使用经用户授权的私人英语长视频，按本机约 30 分钟验证任务执行。原文件路径/名称、音视频内容、字幕正文、对象键、数据库主键、可访问 URL、Bearer 和 Provider 原始结果均未写入仓库、验证脚本输出或本节；仅保留结构性状态、计数、范围和资源指标。
+
+### 10.1 隔离环境与真实调用边界
+
+- 在全新的 PostgreSQL 数据库、启用 versioning 的 MinIO 桶和空 Redis 逻辑库中应用 4 条迁移；不复用此前 5 分钟运行的 DB、桶、队列、对象或任务事实。
+- EchoFlow 工作树锚点为 `f2363a9`；其产品代码与 `8873c35` 相同，二者差异仅为此前的证据/状态文档。MOSS 工作树锚点为 `2f1c2ad`，本轮未修改两边的已跟踪源码。
+- 隔离 API、Worker 和 Provider 均通过启动健康检查。Provider 使用固定模型 revision `e8681d68e7042738ffca8ac8212bc8fcb1131ab8`、RTX 4060 Laptop GPU、`cuda:0`、BF16 和 `8192` token 上限；Worker 使用 300 秒目标分片、2 秒重叠，且 Worker/Provider 临时目录均显式位于 D 盘。
+- 资源采样覆盖约 67 分 56 秒：GPU 峰值 `7876 / 8188 MiB`；C 盘最低剩余 `3.4 GiB`、D 盘最低剩余 `63.09 GiB`。`ProcessingRun.createdAt → failedAt` 为 `4000` 秒。采样只记录显存和磁盘，不含媒体或转写内容。
+
+### 10.2 已验证的真实运行事实
+
+1. 真实 Multipart 上传完成后，G2 将媒体置为 `PLAYABLE`，视频时长为 `1,865,653ms`；G3 开始时读取字幕 API 返回 `409 / transcript_not_ready`，没有在处理中泄露部分字幕。
+2. revision 0 的 6 个真实 Provider 分片均达到 `SUCCEEDED`。随后严格合并没有猜测性拼接，而是创建合同允许的唯一一次 revision `0 → 1` repair，只重跑相邻 pair；旧 6 块保持不变。
+3. revision 1 的 2 个替换分片也均达到 `SUCCEEDED`。所有持久分片的最大 revision 为 1；按每个 chunk index 的最高**候选** revision 聚合后，候选 6 块均成功、范围有效、起点为 `0ms`、终点为 `1,865,653ms`、无覆盖缺口。它们没有成为已发布版本。
+4. repair 后严格合并仍不能得到可安全发布的完整版本，因此 Run 正确终态为 `FAILED / MERGING / transcript_incomplete`。失败态保留 `activePlanRevision=0` 与 `pendingPlanRevision=1`，这是现有确定性回归的合同化失败表示；没有创建 revision 2。
+5. 终态数据库聚合为：媒体仍 `PLAYABLE`，按最高候选 revision 计算的失败/取消 Chunk 数 `0`，`TranscriptVersion=0`、`ACTIVE=0`、Cue=`0`。owner 再次读取字幕 API 得到 `409 / transcript_not_ready`。因此既无半成品字幕，也没有错误激活或可访问 Cue。
+6. 终态后才关闭本轮 Provider/API/Worker 进程树并确认隔离端口不再监听；Docker PostgreSQL、Redis、MinIO 和既有 MOSS GUI 容器均未停止、重配或删除。
+
+### 10.3 验证命令与独立审查
+
+| 命令/检查 | 结果 | 证据边界 |
+|---|---|---|
+| `pnpm --filter @online-learning/database migrate:deploy`（新库） | 通过，4 条迁移全部应用 | 验证本轮空库迁移，不代表含历史业务数据的升级演练 |
+| 隔离启动器的 API / Provider 健康检查 | API 数据库 ready；Provider ready；Worker 存活 | 使用本机真实 Docker 基础设施和 GPU，不代表生产部署 |
+| 真实上传与观察驱动 | G2 `PLAYABLE`；6 块 revision 0、2 块 revision 1 均真实完成；最终 `transcript_incomplete` | 不输出私人媒体或转写正文；不把分片成功误当成字幕发布 |
+| owner `GET /media-assets/:id/transcript` 终态负向检查 | `409 / transcript_not_ready` | 证明失败关闭后无 ACTIVE 可读字幕 |
+| PostgreSQL 终态聚合 | 按最高候选 revision 聚合的 6 块均成功且时间范围有效；`TranscriptVersion=0`、`ACTIVE=0`、Cue=0 | 事实源检查，不读取 `errorDetail`、对象键或字幕正文 |
+| `pnpm --filter @online-learning/worker test -- src/processors/transcript.test.ts` | 32 passed | 覆盖一次 repair 后仍歧义必须 `transcript_incomplete` 且不发布 ACTIVE 的确定性闭环；不替代真实 MOSS |
+| `pnpm lint`、`pnpm build` | 均通过 | 当前产品代码的全仓静态检查与生产构建；本轮仅新增证据文档 |
+| `git diff --check` | 通过 | 证据和状态文档无补丁空白错误 |
+| 独立只读终态审查 | P0=0、P1=0 | 审查范围仅限 revision 上限、有效覆盖和原子不发布；不覆盖准确率、60/120 分钟、故障恢复或安全矩阵 |
+
+### 10.4 观察器事件与结论边界
+
+- 初始观察器因短期测试 Access Token 过期收到 `401`；用同一隔离任务的新 OTP 会话恢复观察，没有重传、重跑、取消或修改任务。后续观察器对该类凭证失效自动重新认证。
+- 观察期间出现过一次 `500 / internal_error`；该次事件后下一次 owner-scoped 读取成功，且**当时**数据库 Run 尚未进入失败态。终态仍为 `FAILED / MERGING / transcript_incomplete`。为避免读取私人转写/对象日志，本轮没有对该单次 API 事件作根因归因；它不是“API 通过”的证据，应作为后续可复现诊断项。
+- 本节证明真实约 31 分钟链路的 **正确失败关闭**、真实 revision 1 触发和原子不发布；它不证明 30 分钟成功发布、字幕准确率、逐词时间、60/120 分钟、真实故障恢复、权限/回调攻击矩阵或 G3 关闭。
+
+## 11. 仍然阻塞 G3 的外部证据
 
 以下任一项不能由 Fake MOSS 或测试数量替代：
 
-1. 使用真实 MOSS 完成剩余 30/60/120 分钟私人 MP4 矩阵；30 秒 WAV 冒烟不能替代真实长视频和分片边界；
+1. 使用真实 MOSS 完成成功发布的 30/60/120 分钟私人 MP4 矩阵；本节的约 31 分钟样本正确失败关闭，不可替代成功矩阵；30 秒 WAV 冒烟也不能替代真实长视频和分片边界；
 2. 核对完整英文、单调且无越界的真实分段时间、分片边界、模型版本和唯一 ACTIVE 发布；若 Provider 返回逐词时间，再额外核对逐词时间；
 3. 在真实推理中演练 MOSS/Worker 重启、轮询丢失、429/503、超时、取消和恢复；
 4. 记录端到端耗时、吞吐、峰值内存、对象大小、供应方错误分类和成本依据；
