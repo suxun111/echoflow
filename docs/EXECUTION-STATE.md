@@ -9,7 +9,7 @@
 | 字段 | 当前值 |
 |---|---|
 | Goal | `v0.5.0-alpha.1` |
-| Gate | `G1`、`G2` 已关闭；`G3` 已完成本地候选、真实 30 秒 MOSS 冒烟、有界不可变 replan/revision 的确定性验证，以及一次真实 5 分钟 EchoFlow → MOSS → ACTIVE 字幕发布。2026-08-23 的真实约 31 分钟完整链路在唯一 revision 1 repair 后正确失败关闭（无 ACTIVE），因此成功的 30/60/120 分钟矩阵及故障恢复矩阵仍未通过，Gate 保持打开 |
+| Gate | `G1`、`G2` 已关闭；`G3` 保持打开。G3-A 已有真实 30 秒 MOSS 冒烟和一次真实约 5 分钟 EchoFlow → MOSS → ACTIVE 字幕发布；G3-B 已冻结为跨分片交接能力基准，尚未选择新样本或启动运行；G3-C 的 30/60/120 分钟完整发布、故障恢复与容量矩阵尚未开始。2026-08-23 的真实约 31 分钟完整链路在唯一 revision 1 repair 后正确失败关闭（无 ACTIVE），因此 G3 仍未满足最终退出条件 |
 | 唯一 trunk | `master` |
 | V1 产品代码审计源点 | `42968ad` |
 | G0 文档基线 | `d01c67e`，已 fast-forward 至 master |
@@ -18,16 +18,24 @@
 | G2 实施分支 | `codex/g2-long-video-upload-playback-20260812`；最终代码验收锚点 `d08f6c6` |
 | G3 实施分支 | `codex/g3-moss-transcript-20260813`；基线提交 `0c3e2ee`（分支创建时的 `master`）；真实 5 分钟发布代码锚点 `8873c35` |
 | MOSS Provider 分支 | `codex/echoflow-provider-gateway-20260815`；当前输入范围校验锚点 `2f1c2ad`（Gateway 基线 `cdf6eb3`） |
-| WIP | G3“MOSS 与完整字幕原子发布”仍是唯一核心纵向闭环；固定真实模型已完成 30 秒 CLI/Provider 冒烟、约 31 分钟的 5 分钟分片实验、一次完整 5 分钟发布，以及一次约 31 分钟的完整 EchoFlow→MOSS 受控失败关闭。不可变 replan/revision 已完成真实一次触发；revision 1 后严格合并歧义现已具有不含字幕正文的结构化诊断与 API 不泄露回归，仍需新的受权真实样本或经审查的 repair 改进来继续长媒体矩阵与故障恢复 |
+| WIP | G3“MOSS 与完整字幕原子发布”仍是唯一核心纵向闭环。当前先执行 [G3-B 分片交接能力基准合同](G3-B-SEGMENT-HANDOFF-BENCHMARK-CONTRACT.md)：以新的受权、可重复样本判断 segment-first 是否能提供跨分片唯一交接证据。固定真实模型已完成 30 秒 CLI/Provider 冒烟、约 31 分钟的 5 分钟分片实验、一次完整 5 分钟发布，以及一次约 31 分钟的完整 EchoFlow→MOSS 受控失败关闭；revision 1 后严格合并歧义现已具有不含字幕正文的结构化诊断与 API 不泄露回归 |
 | 产品功能开发 | G2 已通过退出门；G3 实施中，G4–G5 继续冻结 |
 | Remote | `origin = https://github.com/suxun111/echoflow.git`；Private；外部恢复验证通过 |
-| 下一人工边界 | 选择新的受权真实样本或经审查的 repair 改进，重新验证 30 分钟成功发布；不得自动重跑既有私人样本、不得放宽严格合并或创建 revision 2。新运行若再次失败，应读取内部 `g3MergeFailureDiagnostic` 的枚举/计数证据，再决定是否进入 repair 设计；之后才能继续 60/120 分钟与故障恢复矩阵，未经这些实证不得关闭 G3 |
+| 下一人工边界 | 先执行 G3-B 的 B0 预检：确认真实集成根、Commit、资源、隔离运行身份，并选择新的受权、可重复英语基准样本、创建脱敏 run manifest；完成 B0 后由用户确认是否启动 C1。不得自动重跑既有私人样本、不得放宽严格合并或创建 revision 2。此前真实约 31 分钟运行发生在结构化诊断加入前，不能倒推 failure class；新运行若失败才读取 `g3MergeFailureDiagnostic` 的枚举/计数证据，再决定是否进入预登记 repair 设计 |
 
 ## 2026-08-11 决策澄清
 
 - G5 的发布阶段统一命名为“生产加固与香港邀请制 Alpha”；原 PRD 中两处 `Beta` 是命名不一致，已按版本目标 `v0.5.0-alpha.1` 和 5–10 名邀请用户的证据门统一为 `Alpha`，不改变功能范围；
 - PRD 的 G6 工作流接入是 Alpha 之后的未来阶段，不属于当前 `v0.5.0-alpha.1` Goal；
 - 用户选择“保留旧 worktree”不会阻塞 G0；就 worktree 清理而言，G0 只要求所有资产已保护、已分类且可从独立位置恢复。
+
+## 2026-08-23 G3 证据阶段决策
+
+- 用户已确认把 G3 内部按 G3-A（基础真实链路）、G3-B（跨分片交接可行性）、G3-C（长媒体可靠性与容量）组织；这不是新的 Gate，不解冻 G4/G5，也不降低 G3 最终退出条件；
+- 真实约 31 分钟运行说明 segment-only 输出在切片场景下不天然提供唯一交接证据；严格失败关闭、一次 revision 1 上限和原子不发布语义保持不变；
+- 逐词时间戳仍不是 V1 的必选展示产物，但跨分片唯一交接证据成为非可选发布前提；缺少时必须由真实逐词时间、强制对齐或等价声学证据补足，而非文本猜测；
+- `5/30/60/120` 是 G3 完整字幕发布矩阵；`10/60/180` 是采购、容量与成本基准，两者不得互相替代；
+- 新的 [G3-B 分片交接能力基准合同](G3-B-SEGMENT-HANDOFF-BENCHMARK-CONTRACT.md) 已冻结输入隐私、运行配置、硬断言、转向规则与精确恢复点；本次只创建合同，尚未启动新样本、模型或 Docker 任务。
 
 ## 已完成证据
 
@@ -99,7 +107,7 @@
 - G2 已按 [任务合同](G2-TASK-CONTRACT.md) 实现，并由 [验证证据](G2-VERIFICATION-EVIDENCE.md) 关闭；
 - 最终代码验收锚点为 `d08f6c6`，独立 Reviewer 结论为无 P0/P1；
 - 验证证据已提交为 `3514a4e` 并 fast-forward 至唯一 trunk，8 项退出条件全部成立；
-- 用户已确认开始 G3；[G3 任务合同](G3-TASK-CONTRACT.md) 冻结为当前实施与验收边界；
+- 用户已确认开始 G3；[G3 任务合同](G3-TASK-CONTRACT.md)与 [G3-B 分片交接能力基准合同](G3-B-SEGMENT-HANDOFF-BENCHMARK-CONTRACT.md)共同构成当前实施与验收边界；
 - EchoFlow `ca3e3ad` 已采用 segment-first 契约并接入 `/api/provider/v1`；MOSS `cdf6eb3` 已实现独立 Bearer 网关、稳定幂等身份、代际 fencing、重启协调、不可变结果与持久 TTL。独立 Reviewer 对两个工作树均未发现 P0/P1；
 - [G3 本地验证证据](G3-LOCAL-VERIFICATION-EVIDENCE.md)记录了 EchoFlow 168 个通过测试、MOSS 52 个通过测试、真实 PostgreSQL/Redis/MinIO/FFmpeg、生产构建和隔离网关运行态复验；另有 4 个会自生成样本的 G2 长媒体回归测试因未设置 `RUN_G2_LONG_MEDIA=true` 而跳过；
 - 固定 revision 的真实 MOSS 已在 RTX 4060 Laptop GPU 上完成 30 秒英语 WAV 的 BF16 CLI 与隔离 Provider 冒烟：11 段、时间单调且无越界、同一幂等请求返回稳定外部任务身份；详细边界见 [G3 本地验证证据](G3-LOCAL-VERIFICATION-EVIDENCE.md)；
