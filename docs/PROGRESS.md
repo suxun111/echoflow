@@ -1,8 +1,8 @@
 # EchoFlow 项目进度
 
-更新时间：2026-08-21
+更新时间：2026-08-24
 
-动态任务状态以 [Execution State](EXECUTION-STATE.md) 为准，产品目标以 [V1 PRD](EchoFlow-V1-PRD.md) 为准。
+动态任务状态以 [Execution State](EXECUTION-STATE.md) 为准，产品目标以 [V1 PRD](EchoFlow-V1-PRD.md) 为准。2026-08-24 起，V1 时长上限为 ≤60 分钟；本文件中保留的 120 分钟 G2 结果是旧范围下的历史事实，不再是当前产品门槛。
 
 ## 当前判断
 
@@ -15,7 +15,7 @@ EchoFlow 已具备：
 
 EchoFlow 尚不具备：
 
-- 真实长视频 MOSS 字幕验收；30 秒模型/Provider 冒烟已通过，但不足以替代 5/30/60/120 分钟矩阵；
+- 真实长视频 MOSS 字幕验收；30 秒模型/Provider 冒烟已通过，但不足以替代 5/30/60 分钟矩阵；
 - 经真实供应方证明的 Outbox/Worker/MOSS 完整转写流水线；
 - 真实媒体、完整字幕、逐句练习和进度恢复纵向链路；
 - CI、生产发布和真实基础设施恢复闭环。
@@ -112,5 +112,5 @@ G1 契约、数据库、身份和安全
 - EchoFlow 代码锚点 `ca3e3ad` 已完成 segment-first Adapter、跨片歧义失败关闭、Fake MOSS、真实 FFmpeg 音频处理、持久 Run/Chunk、回调/轮询、恢复、精确对象版本清理和唯一 ACTIVE 原子发布；MOSS Provider Gateway 锚点 `cdf6eb3` 已完成 Bearer、逐跳 host:port 限制、稳定身份、代际 fencing、重启协调、不可变结果和 24 小时/7 天持久清理；
 - EchoFlow 全仓 lint、160 个测试和四应用生产构建通过；MOSS 编译及 52 个测试通过。8002 隔离网关已复验 provider-only 路由、认证、EchoFlow HTTP Adapter 和重启前后稳定身份；4 个会自生成样本的 G2 长媒体回归测试因未设置 `RUN_G2_LONG_MEDIA=true` 而跳过；独立 Reviewer 未发现 P0/P1，详见 [G3 本地验证证据](G3-LOCAL-VERIFICATION-EVIDENCE.md)；
 - 固定 revision 的真实 MOSS 已完成 30 秒英语 WAV 的 CUDA/BF16 CLI 与隔离 Provider 验收：模型、时间边界、segment-first 结果、幂等身份和 `processing → succeeded` 均通过；独立 Reviewer 为 P0/P1=0，详细边界见 [G3 本地验证证据](G3-LOCAL-VERIFICATION-EVIDENCE.md)；
-- 30 秒冒烟不能替代真实长视频：5/30/60/120 分钟矩阵、MOSS/Worker 故障恢复、人工准确率基准以及 EchoFlow API/Worker/对象存储到唯一 ACTIVE 字幕发布的完整链路仍未验证，G3 保持实施中而不关闭；
+- 30 秒冒烟不能替代真实长视频：5/30/60 分钟矩阵、MOSS/Worker 故障恢复、人工准确率基准以及 EchoFlow API/Worker/对象存储到唯一 ACTIVE 字幕发布的完整链路仍未验证，G3 保持实施中而不关闭；
 - G4 的逐句播放器、录音回听和进度恢复以及 G5 生产发布继续冻结。

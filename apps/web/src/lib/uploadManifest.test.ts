@@ -89,11 +89,11 @@ describe('G2 local upload manifest', () => {
     await expect(getUploadManifest(manifest.fileFingerprint)).resolves.toBeUndefined()
   })
 
-  it('always releases the temporary media Object URL after metadata succeeds', async () => {
+  it('accepts exactly sixty minutes and releases the temporary media Object URL after metadata succeeds', async () => {
     const video = document.createElement('video')
     const nativeCreateElement = document.createElement.bind(document)
     Object.defineProperties(video, {
-      duration: { configurable: true, value: 12.5 },
+      duration: { configurable: true, value: 60 * 60 },
       videoWidth: { configurable: true, value: 1920 },
       videoHeight: { configurable: true, value: 1080 },
       load: { configurable: true, value: vi.fn() },
@@ -110,7 +110,7 @@ describe('G2 local upload manifest', () => {
     const inspecting = inspectUploadFile(new File([new Uint8Array([1])], 'podcast.mp4', { type: 'video/mp4' }))
     video.onloadedmetadata?.(new Event('loadedmetadata'))
 
-    await expect(inspecting).resolves.toEqual({ durationMs: 12_500, width: 1920, height: 1080 })
+    await expect(inspecting).resolves.toEqual({ durationMs: 3_600_000, width: 1920, height: 1080 })
     expect(createUrl).toHaveBeenCalledOnce()
     expect(revokeUrl).toHaveBeenCalledWith('blob:echoflow-test')
     expect(video.getAttribute('src')).toBeNull()
@@ -131,11 +131,11 @@ describe('G2 local upload manifest', () => {
     expect(createUrl).not.toHaveBeenCalled()
   })
 
-  it('rejects media just beyond three hours and still releases its Object URL', async () => {
+  it('rejects media just beyond sixty minutes and still releases its Object URL', async () => {
     const video = document.createElement('video')
     const nativeCreateElement = document.createElement.bind(document)
     Object.defineProperties(video, {
-      duration: { configurable: true, value: 3 * 60 * 60 + 0.001 },
+      duration: { configurable: true, value: 60 * 60 + 0.001 },
       videoWidth: { configurable: true, value: 1920 }, videoHeight: { configurable: true, value: 1080 },
       load: { configurable: true, value: vi.fn() },
     })
@@ -149,7 +149,7 @@ describe('G2 local upload manifest', () => {
     })
     const inspecting = inspectUploadFile(new File([new Uint8Array([1])], 'long.mp4', { type: 'video/mp4' }))
     video.onloadedmetadata?.(new Event('loadedmetadata'))
-    await expect(inspecting).rejects.toThrow('3 小时')
+    await expect(inspecting).rejects.toThrow('60 分钟')
     expect(revokeUrl).toHaveBeenCalledWith('blob:echoflow-too-long')
   })
 

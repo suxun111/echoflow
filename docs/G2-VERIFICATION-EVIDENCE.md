@@ -5,6 +5,8 @@
 实施分支：`codex/g2-long-video-upload-playback-20260812`
 结论：8 项退出条件全部满足，无已知 P0/P1；G2 已关闭，G3 尚未开始
 
+> 历史证据提示：本文件如实保留 2026-08-12 在旧范围下完成的 120 分钟/3 小时相关验证。2026-08-24 起，当前 V1 产品准入与后续 Gate 以 [V1 PRD](EchoFlow-V1-PRD.md) 的 `≤60 分钟` 上限为准；这不否定或改写下述已发生事实。
+
 ## 1. 本 Gate 交付结果
 
 G2 已把“私人 MP4 → 浏览器 Multipart 直传 → PostgreSQL 状态与 Outbox → Redis/Worker → ffprobe/fast-start → owner-scoped 签名 Range 播放”接成真实纵向闭环：

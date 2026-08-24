@@ -1,6 +1,5 @@
 import type { UploadPartView, UploadSessionView } from '@online-learning/contracts'
-
-const MAX_UPLOAD_BYTES = 8 * 1024 * 1024 * 1024
+import { MAX_UPLOAD_BYTES, MAX_UPLOAD_DURATION_MS } from './mediaLimits'
 
 const DB_NAME = 'echoflow-private-uploads'
 const STORE = 'manifests'
@@ -91,11 +90,12 @@ export async function inspectUploadFile(file: File): Promise<LocalVideoInfo> {
     const release = () => { video.removeAttribute('src'); video.load(); URL.revokeObjectURL(url) }
     video.preload = 'metadata'
     video.onloadedmetadata = () => {
-      const durationMs = Math.round(video.duration * 1000)
+      const durationSeconds = video.duration
+      const durationMs = Math.round(durationSeconds * 1000)
       const result = { durationMs, width: video.videoWidth, height: video.videoHeight }
       release()
-      if (!Number.isFinite(durationMs) || durationMs <= 0) reject(new Error('无法读取视频时长'))
-      else if (durationMs > 3 * 60 * 60 * 1000) reject(new Error('视频时长不能超过 3 小时'))
+      if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) reject(new Error('无法读取视频时长'))
+      else if (durationSeconds > MAX_UPLOAD_DURATION_MS / 1000) reject(new Error('视频时长不能超过 60 分钟'))
       else resolve(result)
     }
     video.onerror = () => { release(); reject(new Error('浏览器无法读取该 MP4，请确认文件未损坏')) }

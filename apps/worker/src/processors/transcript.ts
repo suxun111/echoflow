@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import type { ServerEnv } from '@online-learning/config'
+import { MAX_UPLOAD_DURATION_MS } from '@online-learning/contracts'
 import { Prisma, type PrismaClient } from '@online-learning/database'
 import type { MultipartStorageProvider, StoredObject } from '@online-learning/storage'
 import { MossError, type MossAdapter, type MossResult } from '../moss/adapter'
@@ -23,6 +24,7 @@ const MAX_AUTOMATIC_PLAN_REVISIONS = 1
 export type TranscriptJob = { mediaAssetId: string; processingRunId: string }
 
 class TranscriptLeaseLostError extends Error {}
+class TranscriptDurationUnsupportedError extends Error {}
 
 type BoundaryRepairDecision =
   | 'created'
@@ -1249,6 +1251,9 @@ export function createTranscriptProcessor(options: TranscriptProcessorOptions) {
         where: { id: job.processingRunId },
         include: { mediaAsset: { include: { objects: { where: { kind: 'ORIGINAL', deletedAt: null }, orderBy: { createdAt: 'desc' }, take: 1 } } } },
       })
+      if (run.mediaAsset.durationMs === null || run.mediaAsset.durationMs > MAX_UPLOAD_DURATION_MS) {
+        throw new TranscriptDurationUnsupportedError('media_duration_unsupported')
+      }
       if (['PLAYBACK_READY', 'AUDIO_EXTRACTING', 'CHUNKING'].includes(run.stage)) await prepareAudio(run, directory)
       const refreshed = await options.database.processingRun.findUniqueOrThrow({ where: { id: run.id } })
       if (refreshed.stage === 'TRANSCRIBING' && !await transcribe(run, directory)) return { skipped: false, waiting: true }
@@ -1259,15 +1264,19 @@ export function createTranscriptProcessor(options: TranscriptProcessorOptions) {
       const current = await options.database.processingRun.findUnique({
         where: { id: job.processingRunId }, select: { attempt: true, stage: true, leaseExpiresAt: true },
       })
-      const code = error instanceof TranscriptValidationError
-        ? error.code
-        : current && ['MERGING', 'CUE_SEGMENTING', 'VALIDATING'].includes(current.stage)
-          ? 'transcript_publish_failed'
-          : current?.stage === 'TRANSCRIBING'
-            ? 'moss_unavailable'
-            : 'audio_extract_failed'
+      const code = error instanceof TranscriptDurationUnsupportedError
+        ? 'media_duration_unsupported'
+        : error instanceof TranscriptValidationError
+          ? error.code
+          : current && ['MERGING', 'CUE_SEGMENTING', 'VALIDATING'].includes(current.stage)
+            ? 'transcript_publish_failed'
+            : current?.stage === 'TRANSCRIBING'
+              ? 'moss_unavailable'
+              : 'audio_extract_failed'
       const attempt = (current?.attempt ?? 0) + 1
-      const terminal = error instanceof TranscriptValidationError || attempt >= options.env.MOSS_MAX_ATTEMPTS
+      const terminal = error instanceof TranscriptDurationUnsupportedError
+        || error instanceof TranscriptValidationError
+        || attempt >= options.env.MOSS_MAX_ATTEMPTS
       const errorDetail = error instanceof TranscriptMergeFailureError
         ? { g3MergeFailureDiagnostic: error.mergeFailureDiagnostic }
         : { message: error instanceof Error ? error.message.slice(0, 500) : 'unknown' }

@@ -59,7 +59,7 @@
 - `POST /api/v1/uploads/:uploadId/complete`：以 provider manifest 和对象 HEAD 幂等完成；
 - `POST /api/v1/uploads/:uploadId/cancel`：取消仍活动的 Multipart。
 
-视频字节不经过 API；上传对象为私有对象，默认 32 MiB 分片、架构上限 8 GiB、续传窗口 7 天。完整请求体和错误码见 `packages/contracts` 与 [G2 任务合同](G2-TASK-CONTRACT.md)。
+视频字节不经过 API；上传对象为私有对象，默认 32 MiB 分片、文件上限 8 GiB、续传窗口 7 天。V1 仅接受 `0 < durationMs ≤ 3_600_000` 的媒体：浏览器可预检，Worker 的 ffprobe/媒体探测最终裁决；超限或无法确认时长的媒体失败且不会成为 `PLAYABLE`，字幕重试也会被拒绝。完整请求体和错误码见 `packages/contracts` 与 [G2 任务合同](G2-TASK-CONTRACT.md)。
 
 ## 媒体、播放与字幕
 
@@ -90,4 +90,4 @@ X-EchoFlow-Signature: v1=<hex hmac-sha256>
 
 ## 尚未挂载或尚未验收
 
-旧 `/api`、固定验证码、公共视频、字幕编辑、内存进度、公共发布和工作流导入均不属于 V1 当前入口。逐句学习、录音回听和进度恢复留到 G4；真实 MOSS 的 30 秒及 5/30/60/120 分钟矩阵通过前，G3 仍是实施中。
+旧 `/api`、固定验证码、公共视频、字幕编辑、内存进度、公共发布和工作流导入均不属于 V1 当前入口。逐句学习、录音回听和进度恢复留到 G4；真实 MOSS 的 30 秒及 5/30/60 分钟矩阵通过前，G3 仍是实施中。

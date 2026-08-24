@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import type { ServerEnv } from '@online-learning/config'
+import { MAX_UPLOAD_DURATION_MS } from '@online-learning/contracts'
 import { PrismaClient } from '@online-learning/database'
 import { MinioStorageProvider, type MultipartStorageProvider } from '@online-learning/storage'
 import { Queue } from 'bullmq'
@@ -52,7 +53,7 @@ async function generate(path: string, seconds: number, audioFilter?: string) {
   ], { windowsHide: true, timeout: 120_000 })
 }
 
-async function createRun(path: string, durationMs: number, suffix: string) {
+async function createRun(path: string, durationMs: number | null, suffix: string) {
   const user = await database.user.create({
     data: { phone: `+8613700${suffix.padStart(6, '0')}`, displayName: `Transcript ${suffix}` },
   })
@@ -157,6 +158,40 @@ describe('G3 real media pipeline with deterministic Fake MOSS', () => {
     expect(objects.map((object) => object.kind)).toEqual(expect.arrayContaining(['ORIGINAL', 'NORMALIZED_AUDIO', 'AUDIO_CHUNK', 'ASR_RAW']))
     expect(await processTranscript({ mediaAssetId: asset.id, processingRunId: run.id })).toEqual({ skipped: true })
   }, 120_000)
+
+  it('fails closed before audio extraction for a legacy playable asset above the sixty-minute V1 limit', async () => {
+    const { asset, run } = await createRun(shortPath, MAX_UPLOAD_DURATION_MS + 1, '60')
+    const download = vi.spyOn(storage, 'downloadFile')
+    const processTranscript = createTranscriptProcessor({
+      database, storage, moss: new FakeMossAdapter(), env, workerId: 'g3-worker-duration-limit',
+    })
+
+    await expect(processTranscript({ mediaAssetId: asset.id, processingRunId: run.id }))
+      .resolves.toMatchObject({ failed: true, errorCode: 'media_duration_unsupported' })
+    expect(await database.processingRun.findUniqueOrThrow({ where: { id: run.id } }))
+      .toMatchObject({ status: 'FAILED', errorCode: 'media_duration_unsupported' })
+    expect(await database.processingChunk.count({ where: { processingRunId: run.id } })).toBe(0)
+    expect(await database.transcriptVersion.count({ where: { mediaAssetId: asset.id } })).toBe(0)
+    expect(download).not.toHaveBeenCalled()
+    download.mockRestore()
+  })
+
+  it('fails closed before audio extraction when a legacy playable asset has no measured duration', async () => {
+    const { asset, run } = await createRun(shortPath, null, '61')
+    const download = vi.spyOn(storage, 'downloadFile')
+    const processTranscript = createTranscriptProcessor({
+      database, storage, moss: new FakeMossAdapter(), env, workerId: 'g3-worker-duration-unknown',
+    })
+
+    await expect(processTranscript({ mediaAssetId: asset.id, processingRunId: run.id }))
+      .resolves.toMatchObject({ failed: true, errorCode: 'media_duration_unsupported' })
+    expect(await database.processingRun.findUniqueOrThrow({ where: { id: run.id } }))
+      .toMatchObject({ status: 'FAILED', errorCode: 'media_duration_unsupported' })
+    expect(await database.processingChunk.count({ where: { processingRunId: run.id } })).toBe(0)
+    expect(await database.transcriptVersion.count({ where: { mediaAssetId: asset.id } })).toBe(0)
+    expect(download).not.toHaveBeenCalled()
+    download.mockRestore()
+  })
 
   it('caps each MOSS audio range to the measured normalized WAV duration when container metadata is slightly longer', async () => {
     const { asset, run } = await createRun(longPath, 80_123, '28')

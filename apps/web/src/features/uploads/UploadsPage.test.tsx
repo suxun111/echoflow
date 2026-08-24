@@ -71,6 +71,7 @@ describe('G2 upload page recovery behavior', () => {
 
     render(<UploadsPage api={api as never}/>)
     await screen.findByText('还没有视频')
+    expect(screen.getByText('MP4 · H.264 · AAC，最长 60 分钟，单文件不超过 8 GiB')).toBeInTheDocument()
     selectPodcast()
     await screen.findByText('podcast.mp4')
     fireEvent.click(screen.getByRole('checkbox'))
@@ -219,5 +220,31 @@ describe('G2 upload page recovery behavior', () => {
 
     expect(await screen.findByText('不支持播放')).toBeInTheDocument()
     expect(screen.getByText('请重新上传 MP4 / H.264 / AAC 文件')).toBeInTheDocument()
+  })
+
+  it('shows the sixty-minute guidance for a server-rejected overlong video', async () => {
+    const now = new Date().toISOString()
+    const completed = {
+      ...session, status: 'completed' as const, uploadedBytes: 11,
+      completedAt: now, mediaAssetId: crypto.randomUUID(),
+    }
+    const failedAsset: MediaAssetView = {
+      id: completed.mediaAssetId, uploadSessionId: session.id, title: session.title,
+      originalName: session.originalName, status: 'failed', durationMs: null,
+      processingStage: 'probing', errorCode: 'media_duration_unsupported',
+      createdAt: now, updatedAt: now,
+    }
+    const api = {
+      fetchJson: vi.fn(async (path: string) => {
+        if (path === '/uploads') return { items: [completed] }
+        if (path === '/media-assets') return { items: [failedAsset] }
+        throw new Error(`unexpected ${path}`)
+      }),
+    }
+
+    render(<UploadsPage api={api as never}/>)
+
+    expect(await screen.findByText('视频时长超限')).toBeInTheDocument()
+    expect(screen.getByText('当前仅支持 60 分钟以内的视频，请选择更短的文件')).toBeInTheDocument()
   })
 })

@@ -4,6 +4,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { INestApplication } from '@nestjs/common'
+import { MAX_UPLOAD_DURATION_MS } from '@online-learning/contracts'
 import { UserRole } from '@online-learning/database'
 import { MinioStorageProvider } from '@online-learning/storage'
 import jwt from 'jsonwebtoken'
@@ -976,6 +977,45 @@ describe('EchoFlow real PostgreSQL, auth, upload and owner boundary', () => {
     expect(await database.mossCallbackReceipt.count()).toBe(2)
     expect(await database.outboxEvent.count({ where: { eventType: 'moss.callback_received' } })).toBe(1)
     expect(await database.processingChunk.findUniqueOrThrow({ where: { id: chunk.id } })).toMatchObject({ status: 'PROCESSING', errorCode: null })
+  })
+
+  it('rejects transcript retry for a legacy playable asset above the sixty-minute V1 limit', async () => {
+    const owner = await login('+8613800000026')
+    const asset = await database.mediaAsset.create({
+      data: {
+        ownerId: owner.user.id, title: 'Legacy long podcast', originalName: 'legacy.mp4',
+        status: 'PLAYABLE', durationMs: MAX_UPLOAD_DURATION_MS + 1,
+      },
+    })
+    await database.mediaObject.create({
+      data: {
+        mediaAssetId: asset.id, kind: 'PLAYBACK', bucket: 'test', objectKey: `private/legacy/${asset.id}.mp4`,
+        contentType: 'video/mp4', sizeBytes: 1n,
+      },
+    })
+    const run = await database.processingRun.create({
+      data: {
+        ownerId: owner.user.id, mediaAssetId: asset.id, pipelineVersion: 'g3-transcript-v1',
+        status: 'FAILED', stage: 'TRANSCRIBING', errorCode: 'moss_timeout', failedAt: new Date(),
+      },
+    })
+
+    const playback = await request(app.getHttpServer())
+      .post(`/api/v1/media-assets/${asset.id}/playback-url`)
+      .set('authorization', `Bearer ${owner.accessToken}`)
+      .expect(201)
+    expect(playback.body).toMatchObject({ mediaAssetId: asset.id })
+    expect(playback.body.playbackUrl).toEqual(expect.any(String))
+
+    const response = await request(app.getHttpServer())
+      .post(`/api/v1/media-assets/${asset.id}/transcript/retry`)
+      .set('authorization', `Bearer ${owner.accessToken}`)
+      .set('idempotency-key', 'retry-duration-limit-1234')
+      .expect(422)
+    expect(response.body).toMatchObject({ code: 'media_duration_unsupported' })
+    expect(await database.processingRun.findUniqueOrThrow({ where: { id: run.id } }))
+      .toMatchObject({ status: 'FAILED', errorCode: 'moss_timeout' })
+    expect(await database.outboxEvent.count({ where: { aggregateId: run.id } })).toBe(0)
   })
 
   it('exposes only the owner ACTIVE transcript and retries only a persisted retryable failure', async () => {

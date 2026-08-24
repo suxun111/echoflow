@@ -3,6 +3,7 @@ import { mkdtemp, open, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
+import { MAX_UPLOAD_DURATION_MS } from '@online-learning/contracts'
 import { Prisma, type PrismaClient } from '@online-learning/database'
 import type { MultipartStorageProvider } from '@online-learning/storage'
 import { G3_PIPELINE_VERSION } from '../transcript/constants'
@@ -31,6 +32,10 @@ export class UnsupportedMediaError extends Error {
 
 class PlaybackLeaseLostError extends Error {}
 
+function unsupportedMediaErrorCode(error: UnsupportedMediaError) {
+  return error.reason === 'duration_out_of_range' ? 'media_duration_unsupported' : 'media_format_unsupported'
+}
+
 export function validateMediaMetadata(input: {
   container: string
   videoCodec: string
@@ -41,7 +46,7 @@ export function validateMediaMetadata(input: {
   if (!input.container.split(',').some((name) => name === 'mov' || name === 'mp4')) throw new UnsupportedMediaError('container_not_mp4')
   if (input.videoCodec !== 'h264') throw new UnsupportedMediaError('video_codec_not_h264')
   if (input.audioCodec !== 'aac') throw new UnsupportedMediaError('audio_codec_not_aac')
-  if (!Number.isFinite(input.durationSeconds) || input.durationSeconds <= 0 || input.durationSeconds > 3 * 60 * 60) {
+  if (!Number.isFinite(input.durationSeconds) || input.durationSeconds <= 0 || input.durationSeconds > MAX_UPLOAD_DURATION_MS / 1000) {
     throw new UnsupportedMediaError('duration_out_of_range')
   }
   return {
@@ -272,6 +277,7 @@ export function createPlaybackProcessor(options: PlaybackProcessorOptions) {
         return { skipped: true, stage: 'PROBING', status: 'lease_lost' }
       }
       if (error instanceof UnsupportedMediaError) {
+        const errorCode = unsupportedMediaErrorCode(error)
         const terminalCommitted = await options.database.$transaction(async (transaction) => {
           const failed = await transaction.processingRun.updateMany({
             where: {
@@ -281,7 +287,7 @@ export function createPlaybackProcessor(options: PlaybackProcessorOptions) {
               leaseOwner: options.workerId,
             },
             data: {
-              status: 'FAILED', failedAt: now(), errorCode: 'media_format_unsupported',
+              status: 'FAILED', failedAt: now(), errorCode,
               errorDetail: { reason: error.reason }, leaseOwner: null, leaseExpiresAt: null,
             },
           })
@@ -292,7 +298,7 @@ export function createPlaybackProcessor(options: PlaybackProcessorOptions) {
           throw failure
         })
         if (!terminalCommitted) return { skipped: true, stage: 'PROBING', status: 'lease_lost' }
-        return { skipped: false, failed: true, errorCode: 'media_format_unsupported' }
+        return { skipped: false, failed: true, errorCode }
       }
       const released = await options.database.processingRun.updateMany({
         where: {

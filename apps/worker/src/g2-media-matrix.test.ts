@@ -9,7 +9,7 @@ import { probeMedia } from './processors/playback'
 
 const execFileAsync = promisify(execFile)
 const runLongMatrix = process.env.RUN_G2_LONG_MEDIA === 'true'
-const matrix = [5, 30, 60, 120]
+const matrix = [5, 30, 60]
 
 describe.skipIf(!runLongMatrix)('G2 long media matrix', () => {
   const storage = new MinioStorageProvider({
@@ -49,7 +49,7 @@ describe.skipIf(!runLongMatrix)('G2 long media matrix', () => {
     }
     const parts = await storage.listMultipartParts(objectKey, providerUploadId)
     expect(parts).toHaveLength(Math.ceil(bytes.length / partSize))
-    if (minutes === 120) expect(parts.length).toBeGreaterThan(1)
+    if (minutes === 60) expect(parts.length).toBeGreaterThan(1)
     expect(parts.reduce((sum, part) => sum + part.sizeBytes, 0)).toBe(bytes.length)
     const completed = await storage.completeMultipartUpload(objectKey, providerUploadId, parts)
     const object = await storage.statObject(objectKey, completed.versionId)

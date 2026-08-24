@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
+import { MAX_UPLOAD_DURATION_MS } from '@online-learning/contracts'
 import { PrismaClient } from '@online-learning/database'
 import { MinioStorageProvider } from '@online-learning/storage'
 import { Queue } from 'bullmq'
@@ -103,10 +104,10 @@ describe('G2 real playback preparation', () => {
     if (temporaryDirectory) await rm(temporaryDirectory, { recursive: true, force: true })
   })
 
-  it('accepts the three-hour architecture boundary without duration overflow', () => {
+  it('accepts the sixty-minute V1 duration boundary and rejects any longer media', () => {
     const metadata = { container: 'mov,mp4', videoCodec: 'h264', audioCodec: 'aac', fastStart: true }
-    expect(validateMediaMetadata({ ...metadata, durationSeconds: 3 * 60 * 60 }).durationMs).toBe(10_800_000)
-    expect(() => validateMediaMetadata({ ...metadata, durationSeconds: 3 * 60 * 60 + 0.001 })).toThrow('duration_out_of_range')
+    expect(validateMediaMetadata({ ...metadata, durationSeconds: MAX_UPLOAD_DURATION_MS / 1000 }).durationMs).toBe(MAX_UPLOAD_DURATION_MS)
+    expect(() => validateMediaMetadata({ ...metadata, durationSeconds: MAX_UPLOAD_DURATION_MS / 1000 + 0.001 })).toThrow('duration_out_of_range')
   })
 
   it('downloads a private MP4 without exposing a signed URL and publishes PLAYABLE exactly once', async () => {
@@ -150,6 +151,21 @@ describe('G2 real playback preparation', () => {
     await expect(transientFailure({ mediaAssetId: retryable.asset.id, processingRunId: retryable.run.id })).rejects.toThrow('temporary')
     expect(await database.processingRun.findUniqueOrThrow({ where: { id: retryable.run.id } }))
       .toMatchObject({ status: 'QUEUED', stage: 'UPLOAD_VERIFIED', attempt: 1, errorCode: 'media_probe_retryable' })
+  })
+
+  it('fails too-long media before publishing playback or enqueuing transcription', async () => {
+    const terminal = await createRun('60')
+    const rejectDuration = createPlaybackProcessor({
+      database, storage, workerId: 'worker-duration-limit', ffprobePath: 'ffprobe',
+      probe: async () => { throw new UnsupportedMediaError('duration_out_of_range') },
+    })
+    await expect(rejectDuration({ mediaAssetId: terminal.asset.id, processingRunId: terminal.run.id }))
+      .resolves.toMatchObject({ failed: true, errorCode: 'media_duration_unsupported' })
+    expect(await database.processingRun.findUniqueOrThrow({ where: { id: terminal.run.id } }))
+      .toMatchObject({ status: 'FAILED', errorCode: 'media_duration_unsupported' })
+    expect(await database.mediaAsset.findUniqueOrThrow({ where: { id: terminal.asset.id } })).toMatchObject({ status: 'FAILED' })
+    expect(await database.outboxEvent.count({ where: { aggregateId: terminal.asset.id } })).toBe(0)
+    expect(await database.processingRun.count({ where: { mediaAssetId: terminal.asset.id, pipelineVersion: 'g3-transcript-v1' } })).toBe(0)
   })
 
   it('keeps the original immutable and creates a fast-start playback object when moov is after mdat', async () => {

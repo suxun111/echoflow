@@ -52,6 +52,7 @@ export const ApiErrorCodeSchema = z.enum([
   'upload_manifest_incomplete',
   'upload_object_mismatch',
   'media_format_unsupported',
+  'media_duration_unsupported',
   'media_not_playable',
   'storage_unavailable',
   'transcript_not_ready',
@@ -87,6 +88,7 @@ export const PrivateLessonSchema = z.object({
 })
 
 export const MAX_UPLOAD_BYTES = 8 * 1024 * 1024 * 1024
+export const MAX_UPLOAD_DURATION_MS = 60 * 60 * 1000
 export const DEFAULT_UPLOAD_PART_SIZE_BYTES = 32 * 1024 * 1024
 
 export const CreateUploadSchema = z.object({

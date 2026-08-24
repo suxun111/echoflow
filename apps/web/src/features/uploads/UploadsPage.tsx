@@ -30,7 +30,10 @@ function formatDuration(durationMs: number | null) {
 function statusCopy(upload: UploadSessionView, asset?: MediaAssetView) {
   if (upload.status === 'cancelled') return ['已取消', '原始分片已撤销']
   if (upload.status === 'expired') return ['已过期', '7 天续传窗口已经结束']
-  if (upload.status === 'failed' || asset?.status === 'failed') return ['不支持播放', asset?.errorCode === 'media_format_unsupported' ? '请重新上传 MP4 / H.264 / AAC 文件' : '对象或媒体检查失败，请重新上传原文件']
+  if (upload.status === 'failed' || asset?.status === 'failed') {
+    if (asset?.errorCode === 'media_duration_unsupported') return ['视频时长超限', '当前仅支持 60 分钟以内的视频，请选择更短的文件']
+    return ['不支持播放', asset?.errorCode === 'media_format_unsupported' ? '请重新上传 MP4 / H.264 / AAC 文件' : '对象或媒体检查失败，请重新上传原文件']
+  }
   if (asset?.status === 'playable'
     && asset.transcriptProcessing?.status === 'succeeded'
     && asset.transcriptProcessing.stage === 'transcript_ready') return ['字幕已完成', '完整英文逐词字幕已经准备好']
@@ -243,7 +246,7 @@ export function UploadsPage({ api }: { api: ApiClient }) {
 
     <section className="upload-workspace">
       <div className="upload-composer">
-        <div className="composer-heading"><span>01</span><div><h2>选择一份英语视频</h2><p>MP4 · H.264 · AAC，最长 3 小时，单文件不超过 8 GiB</p></div></div>
+        <div className="composer-heading"><span>01</span><div><h2>选择一份英语视频</h2><p>MP4 · H.264 · AAC，最长 60 分钟，单文件不超过 8 GiB</p></div></div>
         <input ref={inputRef} hidden type="file" accept="video/mp4,.mp4" onChange={onFileChange}/>
         {!file ? <button className={`file-drop ${phase === 'checking' ? 'checking' : ''}`} onClick={() => inputRef.current?.click()} onDrop={onDrop} onDragOver={(event) => event.preventDefault()} disabled={phase === 'checking'}>
           <span className="drop-wave"><i/><i/><i/><i/><i/></span>

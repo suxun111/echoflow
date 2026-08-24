@@ -1,6 +1,9 @@
 import { Controller, Get, Headers, Inject, Module, Param, Post } from '@nestjs/common'
 import type { ServerEnv } from '@online-learning/config'
-import { ActiveTranscriptViewSchema, TranscriptWordSchema, type AuthUser, type MediaAssetView } from '@online-learning/contracts'
+import {
+  ActiveTranscriptViewSchema, MAX_UPLOAD_DURATION_MS, TranscriptWordSchema,
+  type AuthUser, type MediaAssetView,
+} from '@online-learning/contracts'
 import { Prisma } from '@online-learning/database'
 import { ApiException } from '../../common/api-exception'
 import { CurrentUser } from '../../common/auth.decorators'
@@ -173,6 +176,9 @@ export class MediaAssetsController {
       })
       if (!asset) throw new ApiException(404, 'not_found', '媒体资产不存在')
       if (asset.status !== 'PLAYABLE') throw new ApiException(409, 'media_not_playable', '媒体尚未准备好播放')
+      if (asset.durationMs === null || asset.durationMs > MAX_UPLOAD_DURATION_MS) {
+        throw new ApiException(422, 'media_duration_unsupported', '当前仅支持时长不超过 60 分钟的视频')
+      }
       const run = asset.processingRuns[0]
       if (!run) throw new ApiException(409, 'transcript_not_ready', '字幕任务尚未创建')
       const eventKey = `transcript-retry:${user.id}:${mediaAssetId}:${idempotencyKey}`

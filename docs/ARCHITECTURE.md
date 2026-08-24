@@ -63,7 +63,7 @@ Run/Chunk 采用 lease/CAS 与最终 fencing；旧 Worker 在提交分片、拉�
 
 ## 验证状态
 
-EchoFlow 代码锚点 `ca3e3ad` 已通过全仓 TypeScript 检查、160 个自动化测试、真实 PostgreSQL/MinIO/Redis/FFmpeg 集成和生产构建；配套 MOSS Provider Gateway `cdf6eb3` 已通过编译和 52 个测试。Fake MOSS 覆盖流水线故障矩阵；Provider Gateway 另覆盖 Bearer、逐跳 host:port 限制、稳定身份、代际 fencing、重启协调、不可变结果和持久 TTL。API 将 `g2-playback-v1` Run 映射为顶层媒体阶段和错误，将 `g3-transcript-v1` Run 单独映射为字幕进度；Web 只有在持久阶段为 `transcript_ready` 时才显示“字幕已完成”。独立 Reviewer 未发现 P0/P1。尚未下载并运行真实模型，也未执行 30 秒及 5/30/60/120 分钟真实矩阵，因此当前验证不能关闭 G3。完整边界见 [G3 本地验证证据](G3-LOCAL-VERIFICATION-EVIDENCE.md)。
+EchoFlow 代码锚点 `ca3e3ad` 已通过全仓 TypeScript 检查、160 个自动化测试、真实 PostgreSQL/MinIO/Redis/FFmpeg 集成和生产构建；配套 MOSS Provider Gateway `cdf6eb3` 已通过编译和 52 个测试。Fake MOSS 覆盖流水线故障矩阵；Provider Gateway 另覆盖 Bearer、逐跳 host:port 限制、稳定身份、代际 fencing、重启协调、不可变结果和持久 TTL。API 将 `g2-playback-v1` Run 映射为顶层媒体阶段和错误，将 `g3-transcript-v1` Run 单独映射为字幕进度；Web 只有在持久阶段为 `transcript_ready` 时才显示“字幕已完成”。独立 Reviewer 未发现 P0/P1。V1 当前媒体上限为 60 分钟；尚未完成 30 秒及 5/30/60 分钟真实 MOSS 矩阵，因此当前验证不能关闭 G3。完整边界见 [G3 本地验证证据](G3-LOCAL-VERIFICATION-EVIDENCE.md)。
 
 常用全仓门禁：
 

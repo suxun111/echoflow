@@ -16,11 +16,11 @@ describe('G3 audio chunk planning', () => {
     expect(planAudioChunks(1_300_000, 600_000, 1_000, [])).toHaveLength(2)
   })
 
-  it('covers the full 120-minute V1 boundary with stable contiguous indexes', () => {
-    const plan = planAudioChunks(7_200_000, 600_000, 2_000, [])
-    expect(plan).toHaveLength(12)
+  it('covers the full 60-minute V1 boundary with stable contiguous indexes', () => {
+    const plan = planAudioChunks(3_600_000, 600_000, 2_000, [])
+    expect(plan).toHaveLength(6)
     expect(plan[0]).toMatchObject({ chunkIndex: 0, startMs: 0, endMs: 602_000 })
-    expect(plan.at(-1)).toMatchObject({ chunkIndex: 11, startMs: 6_598_000, endMs: 7_200_000 })
+    expect(plan.at(-1)).toMatchObject({ chunkIndex: 5, startMs: 2_998_000, endMs: 3_600_000 })
     expect(plan.every((chunk, index) => chunk.chunkIndex === index
       && (index === 0 || chunk.startMs <= plan[index - 1].endMs))).toBe(true)
   })
