@@ -1016,6 +1016,28 @@ describe('EchoFlow real PostgreSQL, auth, upload and owner boundary', () => {
     expect(await database.processingRun.findUniqueOrThrow({ where: { id: run.id } }))
       .toMatchObject({ status: 'FAILED', errorCode: 'moss_timeout' })
     expect(await database.outboxEvent.count({ where: { aggregateId: run.id } })).toBe(0)
+
+    const unknownDurationAsset = await database.mediaAsset.create({
+      data: {
+        ownerId: owner.user.id, title: 'Legacy unknown duration', originalName: 'legacy-unknown.mp4',
+        status: 'PLAYABLE', durationMs: null,
+      },
+    })
+    const unknownDurationRun = await database.processingRun.create({
+      data: {
+        ownerId: owner.user.id, mediaAssetId: unknownDurationAsset.id, pipelineVersion: 'g3-transcript-v1',
+        status: 'FAILED', stage: 'TRANSCRIBING', errorCode: 'moss_timeout', failedAt: new Date(),
+      },
+    })
+    const unknownDurationResponse = await request(app.getHttpServer())
+      .post(`/api/v1/media-assets/${unknownDurationAsset.id}/transcript/retry`)
+      .set('authorization', `Bearer ${owner.accessToken}`)
+      .set('idempotency-key', 'retry-duration-unknown-1234')
+      .expect(422)
+    expect(unknownDurationResponse.body).toMatchObject({ code: 'media_duration_unsupported' })
+    expect(await database.processingRun.findUniqueOrThrow({ where: { id: unknownDurationRun.id } }))
+      .toMatchObject({ status: 'FAILED', errorCode: 'moss_timeout' })
+    expect(await database.outboxEvent.count({ where: { aggregateId: unknownDurationRun.id } })).toBe(0)
   })
 
   it('exposes only the owner ACTIVE transcript and retries only a persisted retryable failure', async () => {
