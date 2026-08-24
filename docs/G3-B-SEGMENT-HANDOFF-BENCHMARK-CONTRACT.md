@@ -1,7 +1,7 @@
 # EchoFlow G3-B 分片交接能力基准合同
 
-确认日期：2026-08-23
-状态：用户已确认执行本阶段规划；合同已起草，尚未选择样本、尚未启动真实运行
+确认日期：2026-08-23；状态更新：2026-08-24
+状态：C1 已在新授权私人长媒体上完成并正确失败关闭；B2/B3 暂停，先执行 [G3-BE1 跨分片交接证据增强任务合同](G3-BE1-HANDOFF-EVIDENCE-TASK-CONTRACT.md)的设计与确定性验证准备
 所属 Gate：G3 内部证据阶段，不是新的 Gate，不关闭 G3，也不解冻 G4/G5
 关联：[G3 任务合同](G3-TASK-CONTRACT.md)、[G3 本地验证证据](G3-LOCAL-VERIFICATION-EVIDENCE.md)、[执行状态](EXECUTION-STATE.md)
 
@@ -16,6 +16,8 @@
 - 已有真实 30 秒模型/Provider 冒烟，以及一次真实约 5 分钟 EchoFlow → MOSS → ACTIVE 字幕发布；
 - 一次真实约 31 分钟运行中，revision 0 的 6 个分片和 revision 1 的 2 个替换分片均成功，但 revision 1 后仍无唯一交接证据，正确以 `transcript_incomplete` 失败关闭；没有 ACTIVE `TranscriptVersion` 或 Cue；
 - 该历史运行早于结构化 `g3MergeFailureDiagnostic`，不得倒推填入新的 failure class；
+- 本合同的 C1 已在新授权私人长媒体上执行：8 个有效 Chunk 在一次 revision 1 后仍以 `transcript_incomplete` / `no_textual_suffix_prefix` 失败关闭；没有 `TranscriptVersion`、ACTIVE 或 Cue，owner 字幕读取为 `409 transcript_not_ready`，播放仍可用。该事实不记录或推断私人媒体身份、正文或运行标识；
+- C1 仅证明在 C1 的输入、配置和当前 `segment-first` 语义下，现有路线缺少可接受的唯一交接证据；它不能单独判定 C2/C3 的参数候选无效。为避免无界调参，决策上先暂停 C2/C3，等待 [G3-BE1 合同](G3-BE1-HANDOFF-EVIDENCE-TASK-CONTRACT.md)冻结并验证补充证据路线；
 - 本合同不评估学习体验、字幕整体 WER/CER、逐词时间准确率、120 分钟容量、回调/重启/取消恢复或生产 SLO。
 
 G3-B 的结论只能是“当前交接路线可进入 G3-C”“当前路线不可行/需要补充证据”或“证据不足”；它不能关闭 G3。
@@ -53,19 +55,19 @@ C1 = 300 秒目标分片 / 2 秒重叠 / silence-aware 边界
 
 ## 4. 分阶段执行
 
-### B0：不启动模型的预检
+### B0：不启动模型的预检（已完成）
 
 确认实际写入根为 `C:\Users\33442\Documents\影子学习videcoding（online learning）`，记录分支与 Commit；检查 Docker/端口、模型 revision、GPU、系统盘与临时工作盘可用空间。B0 唯一允许的写入是上述私有 run manifest；若任一项不满足其预先声明，停止，不启动 Worker、模型或真实媒体任务。
 
-### B1：当前基线
+### B1：当前基线 C1（已完成，失败关闭）
 
 以 C1 在一份新的、受权的、约 30 分钟样本上执行真实 EchoFlow → MOSS → 严格合并。每个阶段可恢复；不得因 Agent/终端会话中断而重置已持久化的阶段事实。
 
-### B2：预登记的有限候选
+### B2：预登记的有限候选（暂停）
 
-只有 B1 的结构化结果和私有交接审计完成后，才可运行预登记的 C2/C3。不得对某个失败边界临场随机调参。
+只有 B1 的结构化结果和私有交接审计完成，且 G3-BE1 已提供经确定性验证的严格 handoff evidence 方案后，才可运行预登记的 C2/C3。不得对某个失败边界临场随机调参。
 
-### B3：独立确认
+### B3：独立确认（暂停）
 
 选定配置必须在第二份彼此独立、重新授权的约 30 分钟样本上复现，并使用相同的 EchoFlow/MOSS Commit、Provider/模型 revision、GPU 级别、分片参数和重叠；任何变化均另记为新的 Cx。B1/B2/B3 任一成功都不自动变成 60/120 分钟发布或 G3 关闭证据。
 
@@ -116,4 +118,4 @@ G3-B 仅组织当前最不确定的技术决策。G3 的最终退出条件仍以
 
 ## 8. 精确恢复点
 
-下一次行动只执行 B0：在真实集成根确认 Commit 和环境余量，选择新的受权、可重复英语基准样本，并创建不含私人内容的 run manifest。完成 B0 后再由用户确认是否启动 C1；本合同本身不启动 Docker、模型或真实媒体任务。
+下一次行动是审阅并执行 [G3-BE1 跨分片交接证据增强任务合同](G3-BE1-HANDOFF-EVIDENCE-TASK-CONTRACT.md)的设计与确定性验证准备；本合同本身不启动 Docker、模型、真实媒体任务或 C2/C3。任何新的能力探针、对齐器实现或受控样本运行都必须在 BE1 准入条件满足后由用户重新明确授权。

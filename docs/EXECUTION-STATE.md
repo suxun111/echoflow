@@ -9,7 +9,7 @@
 | 字段 | 当前值 |
 |---|---|
 | Goal | `v0.5.0-alpha.1` |
-| Gate | `G1`、`G2` 已关闭；`G3` 保持打开。G3-A 已有真实 30 秒 MOSS 冒烟和一次真实约 5 分钟 EchoFlow → MOSS → ACTIVE 字幕发布；G3-B 已冻结为跨分片交接能力基准。2026-08-24 已完成不接触媒体的 B0 候选运行态启动/清理验证，但尚未选择新的受权样本或启动真实运行；G3-C 的 30/60/120 分钟完整发布、故障恢复与容量矩阵尚未开始。2026-08-23 的真实约 31 分钟完整链路在唯一 revision 1 repair 后正确失败关闭（无 ACTIVE），因此 G3 仍未满足最终退出条件 |
+| Gate | `G1`、`G2` 已关闭；`G3` 保持打开。G3-A 已有真实 30 秒 MOSS 冒烟和一次真实约 5 分钟 EchoFlow → MOSS → ACTIVE 字幕发布；G3-B 的 C1 已在新授权私人长媒体上完成并正确失败关闭：8 个有效 Chunk 在最多一次 revision 1 后仍无唯一 segment-first 交接证据，未发布 ACTIVE。下一步为 [G3-BE1 跨分片交接证据增强任务合同](G3-BE1-HANDOFF-EVIDENCE-TASK-CONTRACT.md)的设计与确定性验证准备；G3-C 的 30/60/120 分钟完整发布、故障恢复与容量矩阵尚未开始。 |
 | 唯一 trunk | `master` |
 | V1 产品代码审计源点 | `42968ad` |
 | G0 文档基线 | `d01c67e`，已 fast-forward 至 master |
@@ -18,10 +18,10 @@
 | G2 实施分支 | `codex/g2-long-video-upload-playback-20260812`；最终代码验收锚点 `d08f6c6` |
 | G3 实施分支 | `codex/g3-moss-transcript-20260813`；基线提交 `0c3e2ee`（分支创建时的 `master`）；真实 5 分钟发布代码锚点 `8873c35` |
 | MOSS Provider 分支 | `codex/echoflow-provider-gateway-20260815`；当前输入范围校验锚点 `2f1c2ad`（Gateway 基线 `cdf6eb3`） |
-| WIP | G3“MOSS 与完整字幕原子发布”仍是唯一核心纵向闭环。当前先执行 [G3-B 分片交接能力基准合同](G3-B-SEGMENT-HANDOFF-BENCHMARK-CONTRACT.md)：以新的受权、可重复样本判断 segment-first 是否能提供跨分片唯一交接证据。固定真实模型已完成 30 秒 CLI/Provider 冒烟、约 31 分钟的 5 分钟分片实验、一次完整 5 分钟发布，以及一次约 31 分钟的完整 EchoFlow→MOSS 受控失败关闭；revision 1 后严格合并歧义现已具有不含字幕正文的结构化诊断与 API 不泄露回归 |
+| WIP | G3“MOSS 与完整字幕原子发布”仍是唯一核心纵向闭环。C1 证明当前固定 MOSS Provider 的 `segment` 粒度无法在该样本的全部边界提供唯一交接证据；Provider 当前没有经验证的原生 `words[]`，而 EchoFlow 现有字级合并路径也不是严格的 handoff proof 验证器。现执行 [G3-BE1 跨分片交接证据增强任务合同](G3-BE1-HANDOFF-EVIDENCE-TASK-CONTRACT.md)：冻结可审计 `HandoffEvidence v1`、原生逐词路线与独立边界对齐路线的准入条件，以及实现前的确定性测试。 |
 | 产品功能开发 | G2 已通过退出门；G3 实施中，G4–G5 继续冻结 |
 | Remote | `origin = https://github.com/suxun111/echoflow.git`；Private；外部恢复验证通过 |
-| 下一人工边界 | B0 的无媒体候选运行态已验证：受控 EchoFlow/MOSS Commit、GPU/BF16/FFmpeg、回环 API/Provider、独立数据库/Redis DB/bucket 与受控清理均有本地私有证据。B0 仍未完成，因为尚未选择新的受权、可重复英语基准样本并登记其私有 manifest；完成该部分后再由用户明确确认是否启动 C1。不得自动重跑既有私人样本、不得放宽严格合并或创建 revision 2。此前真实约 31 分钟运行发生在结构化诊断加入前，不能倒推 failure class；新运行若失败才读取 `g3MergeFailureDiagnostic` 的枚举/计数证据，再决定是否进入预登记 repair 设计 |
+| 下一人工边界 | 先审阅并实现/验证 G3-BE1 的确定性合同；其后才可由用户明确授权一次经许可的、非私人的短能力探针，或授权独立边界强制对齐路线的实现与受控样本验证。即使是该探针，也不得向日志、Git、Obsidian 或公开 API 输出音频或字幕正文。不得自动重跑 C1、不得创建 revision 2、不得放宽严格合并，也不得把未校准的声纹、embedding、attention 或文本猜测当作交接 proof。 |
 
 ## 2026-08-11 决策澄清
 
@@ -37,6 +37,14 @@
 - `5/30/60/120` 是 G3 完整字幕发布矩阵；`10/60/180` 是采购、容量与成本基准，两者不得互相替代；
 - 新的 [G3-B 分片交接能力基准合同](G3-B-SEGMENT-HANDOFF-BENCHMARK-CONTRACT.md) 已冻结输入隐私、运行配置、硬断言、转向规则与精确恢复点；本次只创建合同，尚未启动新样本、模型或 Docker 任务。
 - 2026-08-24 的 B0 无媒体候选验证只证明本机隔离运行态可启动和受控清理；它没有选择样本、上传或下载音频、加载模型、提交 MOSS、轮询结果或发布字幕，不能写成 C1 或 G3-B 通过。
+
+## 2026-08-24 G3-B C1 终态与 BE1 决策
+
+- 新授权的私人长媒体 C1 已完成受控终态：8 个有效 Chunk 的 MOSS 外部任务成功，且只使用了一次 revision 1；最终严格合并以 `transcript_incomplete` / `no_textual_suffix_prefix` 失败关闭；
+- 原子发布不变量在该次失败中成立：`TranscriptVersion=0`、ACTIVE=0、Cue=0；owner 字幕读取为 `409 transcript_not_ready`，原视频仍可播放。该结论不推断模型、网络、硬件或任何私人字幕正文的错误；
+- C1 是失败关闭证据，不得自动重跑、不得创建 revision 2，也不得读取、写入或向文档泄露其私人正文、媒体身份或运行标识；
+- 当前固定 MOSS Provider 仅经验证提供带时间的 `segment` 结果，尚无可用于发布的原生逐词或声学交接证据；现有 EchoFlow 字级时间路径会按重叠时间丢弃词，尚未实现每个 handoff 的唯一性证明；
+- 因此 B2/B3 和 G3-C 暂停在 [G3-BE1 跨分片交接证据增强任务合同](G3-BE1-HANDOFF-EVIDENCE-TASK-CONTRACT.md)之前。BE1 只冻结证据模型、失败关闭规则、实现切面与确定性验证；不启动新模型、样本、Docker 任务或数据库迁移。
 
 ## 已完成证据
 
