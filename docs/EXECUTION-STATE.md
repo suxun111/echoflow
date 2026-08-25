@@ -21,7 +21,7 @@
 | WIP | G3“MOSS 与完整字幕原子发布”仍是唯一核心纵向闭环。C1 证明当前固定 MOSS Provider 的 `segment` 粒度无法在该样本的全部边界提供唯一交接证据；Provider 当前没有经验证的原生 `words[]`，而 EchoFlow 现有字级合并路径也不是严格的 handoff proof 验证器。[G3-BE1 跨分片交接证据增强任务合同](G3-BE1-HANDOFF-EVIDENCE-TASK-CONTRACT.md)及其[独立复核](G3-BE1-INDEPENDENT-REVIEW.md)，连同已复核的 [G3 v2 实施合同](G3-TRANSCRIPT-V2-IMPLEMENTATION-CONTRACT.md)，已冻结 Route B、失败关闭规则、实施切面与确定性验证边界；等待用户确认具体对齐器/处理边界/资源后才可另建实施启动合同，尚未开始实现。 |
 | 产品功能开发 | G2 已通过退出门；G3 实施中，G4–G5 继续冻结 |
 | Remote | `origin = https://github.com/suxun111/echoflow.git`；Private；外部恢复验证通过 |
-| 下一人工边界 | 先确认具体边界对齐器、数据处理边界与生命周期/资源上限，再单独创建 `g3-transcript-v2` 实施启动合同；不得直接开始实现。选择或下载/采购模型、改变数据地点/保留策略、配置 callback/网络，或执行许可的非私人能力探针/受控样本验证时，均需用户再次明确授权。即使是该探针，也不得向日志、Git、Obsidian 或公开 API 输出音频或字幕正文。不得自动重跑 C1、不得创建 revision 2、不得放宽严格合并，也不得把未校准的声纹、embedding、attention 或文本猜测当作交接 proof。 |
+| 下一人工边界 | [本地 MFA 对齐器决策提案](G3-V2-ALIGNER-DECISION-PROPOSAL.md)已给出“D 盘本地 MFA、无公网 callback、单并发、24 小时原始对齐产物清理”的保守建议；它仍需用户确认，并且当前 C 盘约 0.8 GiB 空间不满足 ≥5 GiB 的下载前置条件。确认并满足空间门槛后，才可单独创建 `g3-transcript-v2` 实施启动合同；不得直接开始实现。即使是后续非私人 probe，也不得向日志、Git、Obsidian 或公开 API 输出音频或字幕正文。不得自动重跑 C1、不得创建 revision 2、不得放宽严格合并，也不得把未校准的声纹、embedding、attention 或文本猜测当作交接 proof。 |
 
 ## 2026-08-11 决策澄清
 
@@ -64,6 +64,12 @@
 - [G3 v2 实施合同](G3-TRANSCRIPT-V2-IMPLEMENTATION-CONTRACT.md)已选择 Route B 作为架构类别，并经独立架构、代码边界及隐私/生命周期三路只读复核；终态为 P0=0、P1=0，详见 [独立复核记录](G3-TRANSCRIPT-V2-IMPLEMENTATION-REVIEW.md)；
 - 合同补齐了 strict assessment 与 final evidence 的区分、`TranscriptRunArbiter`、v1/v2 互斥 enrollment、revision 1 白名单、7 项 `H_*` 汇总、proof key 隔离、回调版本路由及删除/清理边界；这些均是实施要求，尚不是已运行的功能；
 - 具体对齐器/模型与许可证、数据处理地点和 callback、保留期、对象存储/临时盘、GPU/CPU/RAM/预算/并发、以及非私人能力探针仍需用户逐项确认。确认后下一项只能是新的实施启动合同；不得直接创建 migration、安装依赖、启动 Docker 或处理媒体。
+
+## 2026-08-25 G3 v2 本地对齐器决策提案
+
+- 对现有环境、MOSS 边界和官方资料的只读盘点形成 [本地 MFA 对齐器决策提案](G3-V2-ALIGNER-DECISION-PROPOSAL.md)：建议本地 MFA 3.3.9、英文 `english_mfa` 配对、D 盘隔离、进程轮询、单并发、无公网 callback 和约 24 小时原始对齐产物清理；这只是待确认的推荐，不是已安装或已验证的对齐能力；
+- 当日可读环境显示 C 盘约 0.8 GiB、D 盘约 82 GiB、E 盘约 30 GiB；当前 Python 无 MFA/WhisperX/TorchAudio，现有 Docker image 也无 MFA。因此明确禁止在当前条件下下载/安装或拉取新镜像；
+- 后续硬门槛为 C ≥5 GiB、D ≥50 GiB、显式把 Conda/MFA/temp 全部定向 D 盘、冻结并核验软件/模型/词典版本和许可证、并先用新选非私人 30–45 秒英语 probe。未满足时不清理 Docker、不删除用户数据、不重跑 C1。
 
 ## 已完成证据
 
