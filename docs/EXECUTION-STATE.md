@@ -1,6 +1,6 @@
 # EchoFlow Execution State
 
-更新时间：2026-08-24
+更新时间：2026-08-25
 
 此文件记录动态执行状态，不重复存放完整 PRD。长期产品决定见 [EchoFlow V1 PRD](EchoFlow-V1-PRD.md)，整体终点见 [v0.5.0-alpha.1 Goal](GOAL-v0.5.0-alpha.1.md)。
 
@@ -9,7 +9,7 @@
 | 字段 | 当前值 |
 |---|---|
 | Goal | `v0.5.0-alpha.1` |
-| Gate | `G1`、`G2` 已关闭；`G3` 保持打开。G3-A 已有真实 30 秒 MOSS 冒烟和一次真实约 5 分钟 EchoFlow → MOSS → ACTIVE 字幕发布；G3-B 的 C1 已在新授权私人长媒体上完成并正确失败关闭：8 个有效 Chunk 在最多一次 revision 1 后仍无唯一 segment-first 交接证据，未发布 ACTIVE。下一步为 [G3-BE1 跨分片交接证据增强任务合同](G3-BE1-HANDOFF-EVIDENCE-TASK-CONTRACT.md)的设计与确定性验证准备；G3-C 的 30/60 分钟完整发布、故障恢复与容量矩阵尚未开始。 |
+| Gate | `G1`、`G2` 已关闭；`G3` 保持打开。G3-A 已有真实 30 秒 MOSS 冒烟和一次真实约 5 分钟 EchoFlow → MOSS → ACTIVE 字幕发布；G3-B 的 C1 已在新授权私人长媒体上完成并正确失败关闭：8 个有效 Chunk 在最多一次 revision 1 后仍无唯一 segment-first 交接证据，未发布 ACTIVE。BE1 的独立文档/架构复核已通过，下一步仅可创建 `g3-transcript-v2` 实施合同；G3-C 的 30/60 分钟完整发布、故障恢复与容量矩阵尚未开始。 |
 | 唯一 trunk | `master` |
 | V1 产品代码审计源点 | `42968ad` |
 | G0 文档基线 | `d01c67e`，已 fast-forward 至 master |
@@ -18,10 +18,10 @@
 | G2 实施分支 | `codex/g2-long-video-upload-playback-20260812`；最终代码验收锚点 `d08f6c6` |
 | G3 实施分支 | `codex/g3-moss-transcript-20260813`；基线提交 `0c3e2ee`（分支创建时的 `master`）；真实 5 分钟发布代码锚点 `8873c35` |
 | MOSS Provider 分支 | `codex/echoflow-provider-gateway-20260815`；当前输入范围校验锚点 `2f1c2ad`（Gateway 基线 `cdf6eb3`） |
-| WIP | G3“MOSS 与完整字幕原子发布”仍是唯一核心纵向闭环。C1 证明当前固定 MOSS Provider 的 `segment` 粒度无法在该样本的全部边界提供唯一交接证据；Provider 当前没有经验证的原生 `words[]`，而 EchoFlow 现有字级合并路径也不是严格的 handoff proof 验证器。现执行 [G3-BE1 跨分片交接证据增强任务合同](G3-BE1-HANDOFF-EVIDENCE-TASK-CONTRACT.md)：冻结可审计 `HandoffEvidence v1`、原生逐词路线与独立边界对齐路线的准入条件，以及实现前的确定性测试。 |
+| WIP | G3“MOSS 与完整字幕原子发布”仍是唯一核心纵向闭环。C1 证明当前固定 MOSS Provider 的 `segment` 粒度无法在该样本的全部边界提供唯一交接证据；Provider 当前没有经验证的原生 `words[]`，而 EchoFlow 现有字级合并路径也不是严格的 handoff proof 验证器。[G3-BE1 跨分片交接证据增强任务合同](G3-BE1-HANDOFF-EVIDENCE-TASK-CONTRACT.md)及其[独立复核](G3-BE1-INDEPENDENT-REVIEW.md)已冻结证据模型、失败关闭规则、实施切面与确定性验证边界；下一步只可创建 v2 实施合同，尚未开始实现。 |
 | 产品功能开发 | G2 已通过退出门；G3 实施中，G4–G5 继续冻结 |
 | Remote | `origin = https://github.com/suxun111/echoflow.git`；Private；外部恢复验证通过 |
-| 下一人工边界 | 先审阅并实现/验证 G3-BE1 的确定性合同；其后才可由用户明确授权一次经许可的、非私人的短能力探针，或授权独立边界强制对齐路线的实现与受控样本验证。即使是该探针，也不得向日志、Git、Obsidian 或公开 API 输出音频或字幕正文。不得自动重跑 C1、不得创建 revision 2、不得放宽严格合并，也不得把未校准的声纹、embedding、attention 或文本猜测当作交接 proof。 |
+| 下一人工边界 | 先新建并审阅 `g3-transcript-v2` 实施合同，明确路线、实体、对象生命周期、v2 路由与确定性验收；此步骤不实施。选择独立边界对齐器、下载/采购模型、改变数据保留策略，或执行许可的非私人能力探针/受控样本验证时，才需用户再次明确授权。即使是该探针，也不得向日志、Git、Obsidian 或公开 API 输出音频或字幕正文。不得自动重跑 C1、不得创建 revision 2、不得放宽严格合并，也不得把未校准的声纹、embedding、attention 或文本猜测当作交接 proof。 |
 
 ## 2026-08-11 决策澄清
 
@@ -52,6 +52,12 @@
 - 该修订适用于后续产品准入、G3-C 真实矩阵、容量基准和所有新建/重试字幕处理：当前要求为 `5/30/60`，不再以 120 分钟或 3 小时作为 V1 Gate；
 - 浏览器元数据预检只改善体验；Worker ffprobe/媒体探测是时长最终事实源。超限或无法确认时长的输入不得成为 `PLAYABLE` 或进入新的字幕处理；历史超限媒体不自动删除或改写，已发布内容保持只读兼容；
 - 既有 G2 的 120 分钟上传/播放验证和其他历史证据仍如实保留，但从本修订起不再构成当前产品承诺或后续验收门槛。
+
+## 2026-08-25 G3-BE1 独立复核
+
+- [G3-BE1 独立合同与代码边界复核](G3-BE1-INDEPENDENT-REVIEW.md)在不启动 Docker、模型、媒体或迁移的前提下完成；P0=0、P1=0，且没有把路线 B、能力探针或确定性测试写成已完成；
+- 复核确认当前 Gateway 仍为 segment-only，Adapter 可承载但不伪造 `words[]`，现有字级合并不是 strict handoff proof，`ProcessingChunk` 不能复用为对齐任务，且发布路径尚未验证每个 proof；
+- 因此只批准进入 `g3-transcript-v2` 实施合同阶段。该合同必须固定 HandoffEvidence 唯一性/计数、独立对齐任务生命周期、v2 路由与恢复、proof 原子发布与脱敏测试；在用户确认对齐器/资源/保留策略前不实现、不运行新样本。
 
 ## 已完成证据
 

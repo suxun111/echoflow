@@ -1,7 +1,7 @@
 # EchoFlow G3-BE1 跨分片交接证据增强任务合同
 
 确认日期：2026-08-24
-状态：用户已确认启动本合同的设计与确定性验证准备；未启动新模型、未选择新样本、未开始实现。
+状态：独立文档/架构复核已通过；未启动新模型、未选择新样本、未开始实现。复核结论见 [G3-BE1 独立合同与代码边界复核](G3-BE1-INDEPENDENT-REVIEW.md)。
 所属 Gate：G3-B 的补充证据任务，不是新 Gate；不关闭 G3，不进入 G3-C，不解冻 G4/G5。
 关联：[G3-B 分片交接能力基准合同](G3-B-SEGMENT-HANDOFF-BENCHMARK-CONTRACT.md)、[G3 任务合同](G3-TASK-CONTRACT.md)、[执行状态](EXECUTION-STATE.md)、[V1 PRD](EchoFlow-V1-PRD.md)。
 
@@ -183,7 +183,7 @@ effective plan chunks 全部 SUCCEEDED
 
 ## 10. 精确恢复点
 
-下一项只允许执行 BE1 合同的独立复核与仓库文档提交；不启动 Docker/模型、不上传/删除媒体、不创建数据库迁移。
+下一项只允许新建并审阅 `g3-transcript-v2` 实施合同；不启动 Docker/模型、不上传/删除媒体、不创建数据库迁移。路线 B 的具体对齐器、资源成本和保留策略仍需在实施前获得用户确认。
 
 实现前的恢复顺序：
 
