@@ -1,7 +1,7 @@
 # EchoFlow G3-BE1 跨分片交接证据增强任务合同
 
 确认日期：2026-08-24
-状态：独立文档/架构复核已通过；未启动新模型、未选择新样本、未开始实现。复核结论见 [G3-BE1 独立合同与代码边界复核](G3-BE1-INDEPENDENT-REVIEW.md)。
+状态：独立文档/架构复核及后续 [g3-transcript-v2 实施合同](G3-TRANSCRIPT-V2-IMPLEMENTATION-CONTRACT.md)复核均已通过；未启动新模型、未选择新样本、未开始实现。BE1 复核结论见 [G3-BE1 独立合同与代码边界复核](G3-BE1-INDEPENDENT-REVIEW.md)，v2 合同结论见 [G3 v2 实施合同独立复核](G3-TRANSCRIPT-V2-IMPLEMENTATION-REVIEW.md)。
 所属 Gate：G3-B 的补充证据任务，不是新 Gate；不关闭 G3，不进入 G3-C，不解冻 G4/G5。
 关联：[G3-B 分片交接能力基准合同](G3-B-SEGMENT-HANDOFF-BENCHMARK-CONTRACT.md)、[G3 任务合同](G3-TASK-CONTRACT.md)、[执行状态](EXECUTION-STATE.md)、[V1 PRD](EchoFlow-V1-PRD.md)。
 
@@ -183,13 +183,15 @@ effective plan chunks 全部 SUCCEEDED
 
 ## 10. 精确恢复点
 
-下一项只允许新建并审阅 `g3-transcript-v2` 实施合同；不启动 Docker/模型、不上传/删除媒体、不创建数据库迁移。路线 B 的具体对齐器、资源成本和保留策略仍需在实施前获得用户确认。
+`g3-transcript-v2` 实施合同及独立复核已完成。下一项只能在用户确认具体 Route B 对齐器、数据处理边界、资源成本和保留策略后，新建“v2 实施启动合同”；不启动 Docker/模型、不上传/删除媒体、不创建数据库迁移。
 
 实现前的恢复顺序：
 
 ```text
-独立审查本合同
-→ 新建 g3-transcript-v2 实施合同（选择路线 A 或 B）
+独立审查本合同（已完成）
+→ 新建并独立复核 g3-transcript-v2 实施合同（已完成，Route B）
+→ 用户确认具体对齐器、数据/网络/保留与资源边界
+→ 新建 v2 实施启动合同
 → 确定性/Fake 验证
 → 独立审查实现
 → 用户确认能力探针资源与样本

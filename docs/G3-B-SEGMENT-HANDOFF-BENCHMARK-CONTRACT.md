@@ -1,7 +1,7 @@
 # EchoFlow G3-B 分片交接能力基准合同
 
 确认日期：2026-08-23；状态更新：2026-08-24
-状态：C1 已在新授权私人长媒体上完成并正确失败关闭；B2/B3 暂停，先执行 [G3-BE1 跨分片交接证据增强任务合同](G3-BE1-HANDOFF-EVIDENCE-TASK-CONTRACT.md)的设计与确定性验证准备
+状态：C1 已在新授权私人长媒体上完成并正确失败关闭；B2/B3 暂停。BE1 与 [g3-transcript-v2 实施合同](G3-TRANSCRIPT-V2-IMPLEMENTATION-CONTRACT.md)的设计/独立复核已完成，等待用户确认具体对齐器、处理边界和资源后再创建实施启动合同
 所属 Gate：G3 内部证据阶段，不是新的 Gate，不关闭 G3，也不解冻 G4/G5
 关联：[G3 任务合同](G3-TASK-CONTRACT.md)、[G3 本地验证证据](G3-LOCAL-VERIFICATION-EVIDENCE.md)、[执行状态](EXECUTION-STATE.md)
 
@@ -118,4 +118,4 @@ G3-B 仅组织当前最不确定的技术决策。G3 的最终退出条件仍以
 
 ## 8. 精确恢复点
 
-下一次行动是审阅并执行 [G3-BE1 跨分片交接证据增强任务合同](G3-BE1-HANDOFF-EVIDENCE-TASK-CONTRACT.md)的设计与确定性验证准备；本合同本身不启动 Docker、模型、真实媒体任务或 C2/C3。任何新的能力探针、对齐器实现或受控样本运行都必须在 BE1 准入条件满足后由用户重新明确授权。
+下一次行动不是重跑 C1/C2/C3，而是由用户确认 [G3 v2 实施合同](G3-TRANSCRIPT-V2-IMPLEMENTATION-CONTRACT.md)第 12 节的具体对齐器、处理边界与资源后，单独新建 v2 实施启动合同；本合同本身不启动 Docker、模型、真实媒体任务或 C2/C3。任何新的能力探针、对齐器实现或受控样本运行都必须在该实施启动合同和用户重新明确授权后才可开始。
