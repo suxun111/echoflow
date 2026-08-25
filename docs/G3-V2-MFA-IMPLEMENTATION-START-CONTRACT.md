@@ -31,7 +31,7 @@ S0 成功不等于 `HandoffEvidence` 已实现、MFA 对真实播客准确、跨
 
 | 项目 | 固定值 |
 |---|---|
-| MFA 软件 | Conda-forge `montreal-forced-aligner=3.3.9`，安装后必须记录 `mfa version` 与 Conda 显式包清单。 |
+| MFA 软件 | Conda-forge `montreal-forced-aligner=3.3.9`，强制 `kaldi=*=*cpu*`；安装后必须记录 `mfa version` 与 Conda 显式包清单。 |
 | 英文模型 | 官方 `english_mfa` acoustic model 与兼容 dictionary；下载后必须运行 `mfa model inspect`，记录实际模型版本、来源、摘要/许可证信息。无法验证兼容性即失败关闭。 |
 | 目录根 | `D:\tmp\echoflow-aligner\`，其下仅创建 `conda-pkgs`、`conda-envs`、`mfa-root`、`tmp`、`probe` 与 `evidence`。 |
 | 缓存/临时目录 | 进程级 `CONDA_PKGS_DIRS`、`CONDA_ENVS_PATH`、`TMP`、`TEMP`、`MFA_ROOT_DIR` 全部指向上述 D 盘根；不得写入用户 Conda env、C 盘 Temp、Documents/MFA 或 Docker volume。 |
@@ -50,7 +50,7 @@ S0 成功不等于 `HandoffEvidence` 已实现、MFA 对真实播客准确、跨
 4. 使用显式 prefix 创建环境：
 
 ```powershell
-conda create --prefix D:\tmp\echoflow-aligner\conda-envs\mfa-3.3.9 --override-channels -c conda-forge montreal-forced-aligner=3.3.9 -y
+conda create --prefix D:\tmp\echoflow-aligner\conda-envs\mfa-3.3.9 --override-channels -c conda-forge montreal-forced-aligner=3.3.9 "kaldi=*=*cpu*" -y
 ```
 
 5. 使用该 prefix 中的 `mfa` 执行 `version`、`--help` 和模型子命令帮助；若实际 CLI 与本合同预期命令不同，只可调整调用语法，不可改变模型、数据、目录、网络或并发边界；
@@ -69,6 +69,7 @@ conda create --prefix D:\tmp\echoflow-aligner\conda-envs\mfa-3.3.9 --override-ch
 S0 只有同时满足以下条件才为通过：
 
 - MFA 精确版本可运行，模型/词典实际身份和许可证可核验；
+- Conda 显式包清单中 `kaldi` 为 `cpu_` build，且不包含 CUDA Kaldi/MAGMA 依赖；
 - Probe 为 30–45 秒、原创、非私人、全程本机处理；
 - 对齐 exit code 为 0，输出结构可解析，所有被检查 interval 单调且在音频范围内；
 - 作业并发始终为 1，无公网 callback、无 Docker 新容器、无第三方媒体发送；

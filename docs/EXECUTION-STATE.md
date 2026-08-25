@@ -75,6 +75,7 @@
 
 - 用户已确认本地 MFA 3.3.9、仅 D 盘、无第三方传输/公网 callback、单并发与非私人 30–45 秒英语 probe；[S0 实施启动合同](G3-V2-MFA-IMPLEMENTATION-START-CONTRACT.md)冻结了安装、模型 identity、Probe、清理和失败关闭边界；
 - 启动前只读预检已重新确认 C 约 19 GiB、D 约 62 GiB 可用，Conda 与网络可用，当前没有 `mfa` 命令；该事实只授权下一步受控安装/Probe，不是 MFA 已可用或 G3 通过；
+- 默认 Conda dry-run 曾解析到 GPU Kaldi/MAGMA 依赖，已拒绝该方案；CPU 约束 dry-run 已解析为 `kaldi` 的 `cpu_` build、预计下载约 390 MiB。此为求解结果，不是安装、模型下载或 Probe 通过；
 - S0 禁止私人媒体、C1、MOSS、Docker 新容器、迁移、Worker/API/数据库变更；成功后只能进入新的 v2 确定性代码实施合同。
 
 ## 已完成证据
