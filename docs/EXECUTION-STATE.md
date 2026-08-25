@@ -9,7 +9,7 @@
 | 字段 | 当前值 |
 |---|---|
 | Goal | `v0.5.0-alpha.1` |
-| Gate | `G1`、`G2` 已关闭；`G3` 保持打开。G3-A 已有真实 30 秒 MOSS 冒烟和一次真实约 5 分钟 EchoFlow → MOSS → ACTIVE 字幕发布；G3-B 的 C1 已在新授权私人长媒体上完成并正确失败关闭：8 个有效 Chunk 在最多一次 revision 1 后仍无唯一 segment-first 交接证据，未发布 ACTIVE。BE1 与 `g3-transcript-v2` 实施合同的独立复核均已通过；MFA S0 的 D 盘 CPU 安装与 CLI 已通过，但官方英文模型索引受匿名 API 小时限额阻塞，未下载模型、未生成 probe，S0 未通过且未开始 v2 产品实现。G3-C 的 30/60 分钟完整发布、故障恢复与容量矩阵尚未开始。 |
+| Gate | `G1`、`G2` 已关闭；`G3` 保持打开。G3-A 已有真实 30 秒 MOSS 冒烟和一次真实约 5 分钟 EchoFlow → MOSS → ACTIVE 字幕发布；G3-B 的 C1 已在新授权私人长媒体上完成并正确失败关闭：8 个有效 Chunk 在最多一次 revision 1 后仍无唯一 segment-first 交接证据，未发布 ACTIVE。BE1 与 `g3-transcript-v2` 实施合同的独立复核均已通过；MFA S0 的 D 盘 CPU 安装与 CLI 已通过，但官方英文模型仍未下载：第一次受匿名 API 小时限额阻塞，限额提示时间后的一次有界重试五分钟内无终态或模型文件而被中断。未生成 probe，S0 未通过且未开始 v2 产品实现。G3-C 的 30/60 分钟完整发布、故障恢复与容量矩阵尚未开始。 |
 | 唯一 trunk | `master` |
 | V1 产品代码审计源点 | `42968ad` |
 | G0 文档基线 | `d01c67e`，已 fast-forward 至 master |
@@ -18,10 +18,10 @@
 | G2 实施分支 | `codex/g2-long-video-upload-playback-20260812`；最终代码验收锚点 `d08f6c6` |
 | G3 实施分支 | `codex/g3-moss-transcript-20260813`；基线提交 `0c3e2ee`（分支创建时的 `master`）；真实 5 分钟发布代码锚点 `8873c35` |
 | MOSS Provider 分支 | `codex/echoflow-provider-gateway-20260815`；当前输入范围校验锚点 `2f1c2ad`（Gateway 基线 `cdf6eb3`） |
-| WIP | G3“MOSS 与完整字幕原子发布”仍是唯一核心纵向闭环。C1 证明当前固定 MOSS Provider 的 `segment` 粒度无法在该样本的全部边界提供唯一交接证据；Provider 当前没有经验证的原生 `words[]`，而 EchoFlow 现有字级合并路径也不是严格的 handoff proof 验证器。[G3-BE1 跨分片交接证据增强任务合同](G3-BE1-HANDOFF-EVIDENCE-TASK-CONTRACT.md)及其[独立复核](G3-BE1-INDEPENDENT-REVIEW.md)，连同已复核的 [G3 v2 实施合同](G3-TRANSCRIPT-V2-IMPLEMENTATION-CONTRACT.md)，已冻结 Route B、失败关闭规则、实施切面与确定性验证边界。首次 [MFA S0](G3-V2-MFA-IMPLEMENTATION-START-CONTRACT.md)已按停止条件关闭，详见 [脱敏运行证据](G3-V2-MFA-S0-VERIFICATION-EVIDENCE.md)：仅 D 盘 CPU 安装可用，官方模型尚不可下载；尚未开始 v2 代码/迁移或私人媒体处理。 |
+| WIP | G3“MOSS 与完整字幕原子发布”仍是唯一核心纵向闭环。C1 证明当前固定 MOSS Provider 的 `segment` 粒度无法在该样本的全部边界提供唯一交接证据；Provider 当前没有经验证的原生 `words[]`，而 EchoFlow 现有字级合并路径也不是严格的 handoff proof 验证器。[G3-BE1 跨分片交接证据增强任务合同](G3-BE1-HANDOFF-EVIDENCE-TASK-CONTRACT.md)及其[独立复核](G3-BE1-INDEPENDENT-REVIEW.md)，连同已复核的 [G3 v2 实施合同](G3-TRANSCRIPT-V2-IMPLEMENTATION-CONTRACT.md)，已冻结 Route B、失败关闭规则、实施切面与确定性验证边界。[MFA S0](G3-V2-MFA-IMPLEMENTATION-START-CONTRACT.md)已两次失败关闭，详见 [脱敏运行证据](G3-V2-MFA-S0-VERIFICATION-EVIDENCE.md)：仅 D 盘 CPU 安装可用，官方模型仍未得到；尚未开始 v2 代码/迁移或私人媒体处理。 |
 | 产品功能开发 | G2 已通过退出门；G3 实施中，G4–G5 继续冻结 |
 | Remote | `origin = https://github.com/suxun111/echoflow.git`；Private；外部恢复验证通过 |
-| 下一人工边界 | 等待用户在官方匿名模型索引限额重置后，明确确认是否按相同 D 盘、CPU、无 Token/镜像/私有媒体边界重启一次 S0。恢复时只重试官方 `english_mfa` acoustic model 与 dictionary 下载并完成 inspect；模型可核验后才可生成非私人 30–45 秒 probe。不得直接开始 v2 产品实现、重跑 C1、创建 revision 2、放宽严格合并或处理私人媒体。 |
+| 下一人工边界 | 需要用户在两个安全选项中选择其一：在相同 D 盘、CPU、无 Token/镜像/私人媒体边界下给予一次更长的有界官方下载等待；或明确授权改变下载凭据/来源策略并重新评估边界。默认不自动重试。只有模型与字典可下载并 inspect 后才可生成非私人 30–45 秒 probe；不得直接开始 v2 产品实现、重跑 C1、创建 revision 2、放宽严格合并或处理私人媒体。 |
 
 ## 2026-08-11 决策澄清
 
@@ -84,6 +84,13 @@
 - 官方 `english_mfa` acoustic model 的第一次下载在读取官方远端模型索引时，被匿名 API 小时限额拒绝。该失败没有下载模型、没有取得模型 identity/许可证/兼容性，也没有开始 dictionary 下载；因此按 S0 合同停止条件关闭，而不是把软件安装成功写成完整对齐能力通过；
 - `mfa model list acoustic` 与 `dictionary` 均报告没有本地模型；`probe`、`tmp` 目录均为空。未生成、读取、上传或保留任何音频、字幕正文或私人媒体，未启动 Docker/MOSS/C1；
 - 已检查的 C 盘默认 MFA 与 Conda env 目录均不存在；D 盘空间仍高于 S0 硬门槛。完整脱敏事实、命令摘要、边界和精确恢复点见 [S0 第一次运行证据](G3-V2-MFA-S0-VERIFICATION-EVIDENCE.md)。
+
+## 2026-08-25 G3 v2 MFA S0 限额后续接（失败关闭）
+
+- 在先前匿名 API 限额提示的重置时间之后，用户确认按相同边界续接。重新预检确认 MFA `3.3.9`、D 盘环境、CPU 基线、C/D 空间和受限 C 盘默认目录均未反转；
+- 官方 `english_mfa` acoustic model 的单一下载请求运行约五分钟，没有 stdout、退出码或模型文件落盘，随后被有界等待策略中断并以非零退出码结束。该结果证明本轮没有取得模型，不证明远端永久不可用或模型损坏；
+- `api.github.com:443` 与 `github.com:443` 的 TCP 连通性均通过，MFA root 只含配置和模型索引缓存，acoustic/dictionary 本地列表仍为空，`probe` 和 `tmp` 仍为空；
+- 未新增 Token、镜像、第三方媒体传输、callback、Docker/MOSS/C1、迁移或产品代码操作。下一次必须由用户选择更长的同边界等待，或显式批准新的凭据/来源策略后重新评估。
 
 ## 已完成证据
 
