@@ -10,7 +10,7 @@ export const MediaAssetStatusSchema = z.enum(['processing_playback', 'playable',
 export const ProcessingStatusSchema = z.enum(['queued', 'processing', 'validating', 'succeeded', 'failed', 'cancelled'])
 export const ProcessingStageSchema = z.enum([
   'upload_verified', 'probing', 'playback_ready', 'audio_extracting', 'chunking', 'transcribing',
-  'merging', 'cue_segmenting', 'validating', 'transcript_ready', 'course_ready',
+  'handoff_evidencing', 'merging', 'cue_segmenting', 'validating', 'transcript_ready', 'course_ready',
 ])
 export const TranscriptStatusSchema = z.enum(['building', 'active', 'superseded', 'rejected'])
 export const LessonStatusSchema = z.enum(['processing', 'ready', 'archived'])
@@ -141,6 +141,17 @@ export const SignedUploadPartSchema = z.object({
 
 export const SignedUploadPartsResponseSchema = z.object({ parts: z.array(SignedUploadPartSchema) }).strict()
 
+export const HandoffCountsViewSchema = z.object({
+  total: z.number().int().nonnegative(),
+  evidenced: z.number().int().nonnegative(),
+  hTotal: z.number().int().nonnegative(),
+  hUnique: z.number().int().nonnegative(),
+  hR1: z.number().int().nonnegative(),
+  hUnresolved: z.number().int().nonnegative(),
+  hSegment: z.number().int().nonnegative(),
+  hAlignment: z.number().int().nonnegative(),
+}).strict()
+
 export const TranscriptProcessingViewSchema = z.object({
   status: ProcessingStatusSchema.nullable(),
   stage: ProcessingStageSchema.nullable(),
@@ -148,6 +159,7 @@ export const TranscriptProcessingViewSchema = z.object({
   totalChunks: z.number().int().nonnegative(),
   errorCode: z.string().nullable(),
   updatedAt: z.string().datetime().nullable(),
+  handoffCounts: HandoffCountsViewSchema.optional(),
 }).strict()
 
 export const MediaAssetViewSchema = z.object({
@@ -259,6 +271,7 @@ export type TranscriptWord = z.infer<typeof TranscriptWordSchema>
 export type TranscriptCueView = z.infer<typeof TranscriptCueViewSchema>
 export type ActiveTranscriptView = z.infer<typeof ActiveTranscriptViewSchema>
 export type TranscriptProcessingView = z.infer<typeof TranscriptProcessingViewSchema>
+export type HandoffCountsView = z.infer<typeof HandoffCountsViewSchema>
 export type MossCallback = z.infer<typeof MossCallbackSchema>
 export type SubtitleCue = z.infer<typeof SubtitleCueSchema>
 export type VideoSummary = z.infer<typeof VideoSummarySchema>

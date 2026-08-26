@@ -402,6 +402,66 @@ describe('EchoFlow real PostgreSQL, auth, upload and owner boundary', () => {
     expect(detail.body.transcriptProcessing).toBeUndefined()
   })
 
+  it('exposes only desensitized v2 handoff counts, never proof or object identity', async () => {
+    const owner = await login('+8613800000100')
+    const asset = await database.mediaAsset.create({
+      data: {
+        ownerId: owner.user.id, title: 'V2 handoff', originalName: 'v2.mp4', status: 'PLAYABLE', durationMs: 80_000,
+      },
+    })
+    const run = await database.processingRun.create({
+      data: {
+        ownerId: owner.user.id, mediaAssetId: asset.id, pipelineVersion: 'g3-transcript-v2',
+        stage: 'HANDOFF_EVIDENCING', status: 'PROCESSING',
+      },
+    })
+    const previous = await database.processingChunk.create({
+      data: {
+        processingRunId: run.id, planRevision: 0, chunkIndex: 0, startMs: 0, endMs: 40_000, status: 'SUCCEEDED',
+        idempotencyKey: 'ik-v2-0', modelVersion: 'm', inputObjectKey: 'private/input-0', resultObjectKey: 'private/asr-0', resultChecksum: 'a'.repeat(64),
+      },
+    })
+    const next = await database.processingChunk.create({
+      data: {
+        processingRunId: run.id, planRevision: 0, chunkIndex: 1, startMs: 38_000, endMs: 80_000, status: 'SUCCEEDED',
+        idempotencyKey: 'ik-v2-1', modelVersion: 'm', inputObjectKey: 'private/input-1', resultObjectKey: 'private/asr-1', resultChecksum: 'b'.repeat(64),
+      },
+    })
+    const handoff = await database.processingHandoff.create({
+      data: {
+        processingRunId: run.id, planRevision: 0, logicalHandoffIndex: 0,
+        previousChunkId: previous.id, nextChunkId: next.id, status: 'EVIDENCED',
+      },
+    })
+    await database.handoffEvidence.create({
+      data: {
+        handoffId: handoff.id, planRevision: 0, logicalHandoffIndex: 0,
+        decision: 'accepted', decisionCode: 'evidence_accepted', evidenceType: 'strict_segment',
+        schemaVersion: '1', pipelineVersion: 'g3-transcript-v2',
+        previousChunkId: previous.id, nextChunkId: next.id,
+        previousAsrObjectKey: 'private/asr-0', nextAsrObjectKey: 'private/asr-1',
+        methodProvider: 'strict_segment', methodVersion: '1',
+        windowStartMs: 38_000, windowEndMs: 40_000, candidateCount: 1,
+        proofKeyVersion: 'test-v1', proofDigest: 'f'.repeat(64),
+      },
+    })
+
+    const detail = await request(app.getHttpServer())
+      .get(`/api/v1/media-assets/${asset.id}`)
+      .set('authorization', `Bearer ${owner.accessToken}`)
+      .expect(200)
+    expect(detail.body.transcriptProcessing).toMatchObject({
+      status: 'processing', stage: 'handoff_evidencing', completedChunks: 2, totalChunks: 2,
+      handoffCounts: { total: 1, evidenced: 1, hTotal: 0, hUnique: 0, hR1: 0, hUnresolved: 0, hSegment: 0, hAlignment: 0 },
+    })
+    const serialized = JSON.stringify(detail.body)
+    expect(serialized).not.toContain('proofDigest')
+    expect(serialized).not.toContain('proofKeyVersion')
+    expect(serialized).not.toContain('private/asr-0')
+    expect(serialized).not.toContain('rawObjectKey')
+    expect(serialized).not.toContain('externalJobId')
+  })
+
   it('persists OTP/session state and rotates an HttpOnly refresh cookie after app restart', async () => {
     const session = await login('+8613800000001')
     expect(session.rawCookie).toContain('HttpOnly')

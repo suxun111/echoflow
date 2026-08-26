@@ -60,15 +60,21 @@ function toView(asset: {
     activePlanRevision: number
     pendingPlanRevision: number | null
     chunks: Array<{ chunkIndex: number; planRevision: number; status: string }>
+    handoffs?: Array<{ logicalHandoffIndex: number; planRevision: number; status: string }>
+    transcriptVersions?: Array<{
+      hTotal: number; hUnique: number; hR1: number; hUnresolved: number; hSegment: number; hAlignment: number
+    }>
   }>
   createdAt: Date
   updatedAt: Date
 }): MediaAssetView {
   const playbackRun = asset.processingRuns?.find((run) => run.pipelineVersion === 'g2-playback-v1')
   const transcriptRun = asset.processingRuns?.find((run) => run.pipelineVersion === 'g3-transcript-v1')
+    ?? asset.processingRuns?.find((run) => run.pipelineVersion === 'g3-transcript-v2')
   const transcriptChunks = transcriptRun
     ? effectivePlanChunks(transcriptRun.chunks, currentPlanRevision(transcriptRun))
     : []
+  const isV2 = transcriptRun?.pipelineVersion === 'g3-transcript-v2'
   return {
     id: asset.id,
     uploadSessionId: asset.uploadSessionId,
@@ -85,9 +91,33 @@ function toView(asset: {
       totalChunks: transcriptChunks.length,
       errorCode: transcriptRun.errorCode,
       updatedAt: transcriptRun.updatedAt.toISOString(),
+      ...(isV2 ? { handoffCounts: handoffCountsView(transcriptRun) } : {}),
     } : undefined,
     createdAt: asset.createdAt.toISOString(),
     updatedAt: asset.updatedAt.toISOString(),
+  }
+}
+
+function handoffCountsView(run: {
+  activePlanRevision: number
+  pendingPlanRevision: number | null
+  handoffs?: Array<{ logicalHandoffIndex: number; planRevision: number; status: string }>
+  transcriptVersions?: Array<{
+    hTotal: number; hUnique: number; hR1: number; hUnresolved: number; hSegment: number; hAlignment: number
+  }>
+}) {
+  const revision = currentPlanRevision(run)
+  const handoffs = (run.handoffs ?? []).filter((handoff) => handoff.planRevision === revision)
+  const latest = run.transcriptVersions?.[0]
+  return {
+    total: handoffs.length,
+    evidenced: handoffs.filter((handoff) => handoff.status === 'EVIDENCED').length,
+    hTotal: latest?.hTotal ?? 0,
+    hUnique: latest?.hUnique ?? 0,
+    hR1: latest?.hR1 ?? 0,
+    hUnresolved: latest?.hUnresolved ?? 0,
+    hSegment: latest?.hSegment ?? 0,
+    hAlignment: latest?.hAlignment ?? 0,
   }
 }
 
@@ -101,12 +131,14 @@ export class MediaAssetsController {
 
   private processingInclude() {
     return {
-      where: { pipelineVersion: { in: ['g2-playback-v1', 'g3-transcript-v1'] as string[] } },
+      where: { pipelineVersion: { in: ['g2-playback-v1', 'g3-transcript-v1', 'g3-transcript-v2'] as string[] } },
       orderBy: { createdAt: 'desc' },
       select: {
         pipelineVersion: true, status: true, stage: true, errorCode: true, updatedAt: true,
         activePlanRevision: true, pendingPlanRevision: true,
         chunks: { select: { chunkIndex: true, planRevision: true, status: true } },
+        handoffs: { select: { logicalHandoffIndex: true, planRevision: true, status: true } },
+        transcriptVersions: { select: { hTotal: true, hUnique: true, hR1: true, hUnresolved: true, hSegment: true, hAlignment: true } },
       },
     } as const
   }
