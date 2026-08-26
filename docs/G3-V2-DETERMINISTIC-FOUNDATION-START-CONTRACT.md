@@ -1,9 +1,10 @@
 # EchoFlow G3 v2 确定性基础层实施启动合同（草案）
 
 创建日期：2026-08-26
-状态：**待用户确认；本文件只冻结建议的首批实现边界，不授权创建 migration、修改代码、启动服务或处理任何媒体。**
+确认日期：2026-08-26
+状态：**已确认。用户确认 F1 范围：仅实施 v2 schema、纯领域校验、AlignmentAdapter Fake、独立可弃测试库与确定性测试；不接真实 MFA/MOSS、媒体、对象存储、网络、API 或 Worker；未来留存、回调、资源、密钥和 enrollment 另行确认。第 5 节除“F1 范围”外的所有建议仅为待决记录，不构成本次确认。**
 
-在用户明确确认 F1 范围前，**不得直接开始 v2 产品实现**，也不得把本草案当作 Route B、真实对齐或 G3 通过证据。
+本确认只冻结 F1 的首批实现边界，不授权真实媒体、外部服务或生产密钥；不得把本文件当作 Route B、真实对齐或 G3 通过证据。
 
 上游依据：[G3 `g3-transcript-v2` 实施合同](G3-TRANSCRIPT-V2-IMPLEMENTATION-CONTRACT.md)、[实施合同独立复核](G3-TRANSCRIPT-V2-IMPLEMENTATION-REVIEW.md)、[MFA S0 运行证据](G3-V2-MFA-S0-VERIFICATION-EVIDENCE.md)、[执行状态](EXECUTION-STATE.md)。
 

@@ -21,7 +21,7 @@
 | WIP | G3“MOSS 与完整字幕原子发布”仍是唯一核心纵向闭环。C1 证明当前固定 MOSS Provider 的 `segment` 粒度无法在该样本的全部边界提供唯一交接证据；Provider 当前没有经验证的原生 `words[]`，而 EchoFlow 现有字级合并路径也不是严格的 handoff proof 验证器。[G3-BE1 跨分片交接证据增强任务合同](G3-BE1-HANDOFF-EVIDENCE-TASK-CONTRACT.md)及其[独立复核](G3-BE1-INDEPENDENT-REVIEW.md)，连同已复核的 [G3 v2 实施合同](G3-TRANSCRIPT-V2-IMPLEMENTATION-CONTRACT.md)，已冻结 Route B、失败关闭规则、实施切面与确定性验证边界。[MFA S0](G3-V2-MFA-IMPLEMENTATION-START-CONTRACT.md)已关闭，完整证据见 [脱敏运行证据](G3-V2-MFA-S0-VERIFICATION-EVIDENCE.md)；下一步仅能先创建/确认新的确定性 v2 代码实施任务合同，尚未开始迁移、代码或私人媒体处理。 |
 | 产品功能开发 | G2 已通过退出门；G3 实施中，G4–G5 继续冻结 |
 | Remote | `origin = https://github.com/suxun111/echoflow.git`；Private；外部恢复验证通过 |
-| 下一人工边界 | S0 已关闭；[v2 确定性基础层启动合同草案](G3-V2-DETERMINISTIC-FOUNDATION-START-CONTRACT.md)已创建。用户只需确认 F1 仅包含 schema/纯领域/Fake/测试及其独立可弃的本地测试基础设施；未来数据生命周期、对齐器、网络/回调、资源、proof key 和 enrollment 仍须后续合同单独确认。确认前不得直接开始 v2 产品实现、重跑 C1、创建 revision 2、放宽严格合并或处理私人媒体。 |
+| 下一人工边界 | S0 已关闭；[v2 确定性基础层启动合同](G3-V2-DETERMINISTIC-FOUNDATION-START-CONTRACT.md)已确认。用户确认 F1 范围：仅实施 v2 schema、纯领域校验、AlignmentAdapter Fake、独立可弃测试库与确定性测试；不接真实 MFA/MOSS、媒体、对象存储、网络、API 或 Worker。未来数据生命周期、对齐器、网络/回调、资源、proof key 和 enrollment 仍须后续合同单独确认。F1 实施只允许新建前向 migration、纯领域/Fake 与测试，并在独立可弃 PostgreSQL 测试库上运行；不得重跑 C1、创建 revision 2、放宽严格合并或处理私人媒体。 |
 
 > S0 已于 2026-08-26 完成清理与冻结条件下的只读复核：目录枚举、两次 UTF-8 `mfa model inspect`、本地 catalog/哈希、CPU 约束、侧车证据和受限 C 盘路径均与已冻结证据一致。
 
@@ -122,6 +122,11 @@
 - 在 S0 关闭后，已基于上游 v2 实施合同和当前代码面创建 [确定性基础层启动合同草案](G3-V2-DETERMINISTIC-FOUNDATION-START-CONTRACT.md)；它把第一批工作收敛到前向 schema/migration、纯领域 validator、`AlignmentAdapter` Fake 和确定性数据库/单元测试；
 - 草案明确不触碰 `G3_PIPELINE_VERSION`、v1 自动建 run/合并/恢复/callback、真实 MFA/MOSS、对象存储对象、API/Web、私有媒体或历史 migration；它不是实施授权，也不代表 Route B、真实对齐或 G3 已完成；
 - 用户仅需确认 F1 范围及独立可弃的本地测试基础设施；第 5 节的真实数据、网络/回调、资源、隐私/留存、proof key 与 enrollment 仍待后续合同单独确认。确认后才能建立独立实施分支并开始 F1；未经确认不得创建 migration 或运行数据库/服务。
+
+## 2026-08-26 G3 v2 确定性基础层启动合同（已确认）
+
+- 用户已确认 F1 范围：仅实施 v2 schema、纯领域校验、AlignmentAdapter Fake、独立可弃测试库与确定性测试；不接真实 MFA/MOSS、媒体、对象存储、网络、API 或 Worker；未来留存、回调、资源、密钥和 enrollment 另行确认；第 5 节除 F1 外的建议仅为待决记录。
+- 合同状态已改为“已确认”。按合同第 7 节，下一步为创建独立实施分支并逐项完成 F1 的 schema、纯领域、Fake 与测试；每次审核后绑定 Commit。F1 完成后，下一份合同才讨论 TranscriptRunArbiter、显式 enrollment、v2 Worker/Outbox/API 路由和受控对象生命周期。
 
 ## 已完成证据
 
