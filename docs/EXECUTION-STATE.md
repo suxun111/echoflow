@@ -21,7 +21,7 @@
 | WIP | G3“MOSS 与完整字幕原子发布”仍是唯一核心纵向闭环。C1 证明当前固定 MOSS Provider 的 `segment` 粒度无法在该样本的全部边界提供唯一交接证据；Provider 当前没有经验证的原生 `words[]`，而 EchoFlow 现有字级合并路径也不是严格的 handoff proof 验证器。[G3-BE1 跨分片交接证据增强任务合同](G3-BE1-HANDOFF-EVIDENCE-TASK-CONTRACT.md)及其[独立复核](G3-BE1-INDEPENDENT-REVIEW.md)，连同已复核的 [G3 v2 实施合同](G3-TRANSCRIPT-V2-IMPLEMENTATION-CONTRACT.md)，已冻结 Route B、失败关闭规则、实施切面与确定性验证边界。[MFA S0](G3-V2-MFA-IMPLEMENTATION-START-CONTRACT.md)已关闭，完整证据见 [脱敏运行证据](G3-V2-MFA-S0-VERIFICATION-EVIDENCE.md)；下一步仅能先创建/确认新的确定性 v2 代码实施任务合同，尚未开始迁移、代码或私人媒体处理。 |
 | 产品功能开发 | G2 已通过退出门；G3 实施中，G4–G5 继续冻结 |
 | Remote | `origin = https://github.com/suxun111/echoflow.git`；Private；外部恢复验证通过 |
-| 下一人工边界 | S0 已关闭；[v2 确定性基础层启动合同](G3-V2-DETERMINISTIC-FOUNDATION-START-CONTRACT.md)已确认。用户确认 F1 范围：仅实施 v2 schema、纯领域校验、AlignmentAdapter Fake、独立可弃测试库与确定性测试；不接真实 MFA/MOSS、媒体、对象存储、网络、API 或 Worker。未来数据生命周期、对齐器、网络/回调、资源、proof key 和 enrollment 仍须后续合同单独确认。F1 实施只允许新建前向 migration、纯领域/Fake 与测试，并在独立可弃 PostgreSQL 测试库上运行；不得重跑 C1、创建 revision 2、放宽严格合并或处理私人媒体。 |
+| 下一人工边界 | F1 已实施并推送（`06a9be7`）。[v2 运行态实施启动合同草案](G3-V2-RUNTIME-IMPLEMENTATION-START-CONTRACT.md)已起草：下一批冻结 `TranscriptRunArbiter`、v2 显式 enrollment、v2 Worker/Outbox/API 路由与受控对象生命周期，仅用注入式 Fake 与测试基础设施；对齐器（建议本地 MFA 3.3.9）、网络/回调（建议纯轮询）、数据生命周期（HANDOFF_AUDIO≈24h / ALIGNMENT_RAW≤7d）、资源与并发、proof key 生产来源与 enrollment 隐私告知仍待用户确认。确认 F2 前不得开始运行态实现、接入真实对齐器或处理私人媒体。 |
 
 > S0 已于 2026-08-26 完成清理与冻结条件下的只读复核：目录枚举、两次 UTF-8 `mfa model inspect`、本地 catalog/哈希、CPU 约束、侧车证据和受限 C 盘路径均与已冻结证据一致。
 
@@ -136,6 +136,11 @@
 - 验证：worker 132 通过 + 3 跳过（`RUN_G2_LONG_MEDIA` 门控），其中新增 handoff 56 个纯函数/Fake 测试；database 33 通过（17 文本断言 + 16 真实 PostgreSQL 集成测试，库 `echoflow_g2_v2_foundation_test`）；根级 lint/test/build 全通过。
 - 独立 Reviewer 结论：无 P0；1 个 P1（final evidence 终态可被 DELETE 绕过）已修复为 append-only（新增 `BEFORE DELETE` trigger + 集成测试）；其余 P2（PG≥13 注释、幂等键排序序列化、pretest 依赖、冗余索引）已按需处理或记录。
 - 该证据只证明 F1 合同实现正确，不证明 MFA 对真实播客准确、真实 handoff 已解决、B2/B3/G3-C 通过或 G3 关闭。
+
+## 2026-08-26 G3 v2 运行态实施启动合同（草案）
+
+- F1 完成后，已起草 [v2 运行态实施启动合同草案](G3-V2-RUNTIME-IMPLEMENTATION-START-CONTRACT.md)，冻结下一批工作：`TranscriptRunArbiter`、v2 显式 enrollment、v2 Worker/Outbox/API 路由与受控对象生命周期（`HANDOFF_AUDIO`≈24h、`ALIGNMENT_RAW`≤7d），且仅用注入式 Fake 与测试基础设施。
+- 仍未确认（第 3 节待决记录，确认 F2 不等于确认它们）：本地 MFA 3.3.9 对齐器、纯轮询无回调、数据生命周期精确值、CPU/单并发资源预算、生产 proof key 来源与 enrollment 隐私告知。未经确认不得开始运行态实现、接入真实对齐器或处理私人媒体。
 
 ## 已完成证据
 
