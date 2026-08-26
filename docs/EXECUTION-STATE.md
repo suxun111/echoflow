@@ -21,7 +21,7 @@
 | WIP | G3“MOSS 与完整字幕原子发布”仍是唯一核心纵向闭环。C1 证明当前固定 MOSS Provider 的 `segment` 粒度无法在该样本的全部边界提供唯一交接证据；Provider 当前没有经验证的原生 `words[]`，而 EchoFlow 现有字级合并路径也不是严格的 handoff proof 验证器。[G3-BE1 跨分片交接证据增强任务合同](G3-BE1-HANDOFF-EVIDENCE-TASK-CONTRACT.md)及其[独立复核](G3-BE1-INDEPENDENT-REVIEW.md)，连同已复核的 [G3 v2 实施合同](G3-TRANSCRIPT-V2-IMPLEMENTATION-CONTRACT.md)，已冻结 Route B、失败关闭规则、实施切面与确定性验证边界。[MFA S0](G3-V2-MFA-IMPLEMENTATION-START-CONTRACT.md)已关闭，完整证据见 [脱敏运行证据](G3-V2-MFA-S0-VERIFICATION-EVIDENCE.md)；下一步仅能先创建/确认新的确定性 v2 代码实施任务合同，尚未开始迁移、代码或私人媒体处理。 |
 | 产品功能开发 | G2 已通过退出门；G3 实施中，G4–G5 继续冻结 |
 | Remote | `origin = https://github.com/suxun111/echoflow.git`；Private；外部恢复验证通过 |
-| 下一人工边界 | S0 已关闭。下一项只允许基于既有 [G3 v2 实施合同](G3-TRANSCRIPT-V2-IMPLEMENTATION-CONTRACT.md)创建并确认一份新的确定性代码实施任务合同，明确第一批领域模型、迁移、Fake、路由与数据库测试的范围/验收；在该合同确认前，不得直接开始 v2 产品实现、重跑 C1、创建 revision 2、放宽严格合并或处理私人媒体。 |
+| 下一人工边界 | S0 已关闭；[v2 确定性基础层启动合同草案](G3-V2-DETERMINISTIC-FOUNDATION-START-CONTRACT.md)已创建。用户只需确认 F1 仅包含 schema/纯领域/Fake/测试及其独立可弃的本地测试基础设施；未来数据生命周期、对齐器、网络/回调、资源、proof key 和 enrollment 仍须后续合同单独确认。确认前不得直接开始 v2 产品实现、重跑 C1、创建 revision 2、放宽严格合并或处理私人媒体。 |
 
 > S0 已于 2026-08-26 完成清理与冻结条件下的只读复核：目录枚举、两次 UTF-8 `mfa model inspect`、本地 catalog/哈希、CPU 约束、侧车证据和受限 C 盘路径均与已冻结证据一致。
 
@@ -116,6 +116,12 @@
 - 受限 C 盘默认 MFA/Conda/Temp 路径仍均不存在。MFA `3.3.9` 在 Console UTF-8、`PYTHONIOENCODING=utf-8`、`PYTHONUTF8=1`、`TERM=dumb` 的冻结进程条件下，两次 `mfa model inspect` 均 exit `0`；
 - 本地 `english_mfa` 声学模型 `3.1.0` 与词典的 SHA-256、MFA catalog 的 tag/name/version/file-name 映射、官方 release asset 字节数，及 CPU Kaldi `5.5.1172` 的 `cpu_` build（无 CUDA/cuDNN/MAGMA）均与既有侧车和文档证据一致；catalog 的整数记录按 release id 解释，不作为文件大小比较；侧车仍报告 40.459 秒、107 个词级/309 个音素级区间、零无效/越界/非单调检查项；
 - 因此 S0 的模型 identity/来源链/许可边界、非私人 Probe、单并发本机对齐、脱敏证据、清理和复核断言同时成立，S0 通过并关闭。它不关闭 G3，也不证明真实播客、HandoffEvidence 或私人媒体能力；下一项仍须先建立新的 v2 确定性代码实施任务合同。
+
+## 2026-08-26 G3 v2 确定性基础层启动合同（草案）
+
+- 在 S0 关闭后，已基于上游 v2 实施合同和当前代码面创建 [确定性基础层启动合同草案](G3-V2-DETERMINISTIC-FOUNDATION-START-CONTRACT.md)；它把第一批工作收敛到前向 schema/migration、纯领域 validator、`AlignmentAdapter` Fake 和确定性数据库/单元测试；
+- 草案明确不触碰 `G3_PIPELINE_VERSION`、v1 自动建 run/合并/恢复/callback、真实 MFA/MOSS、对象存储对象、API/Web、私有媒体或历史 migration；它不是实施授权，也不代表 Route B、真实对齐或 G3 已完成；
+- 用户仅需确认 F1 范围及独立可弃的本地测试基础设施；第 5 节的真实数据、网络/回调、资源、隐私/留存、proof key 与 enrollment 仍待后续合同单独确认。确认后才能建立独立实施分支并开始 F1；未经确认不得创建 migration 或运行数据库/服务。
 
 ## 已完成证据
 
