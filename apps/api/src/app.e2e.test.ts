@@ -206,6 +206,23 @@ describe('EchoFlow real PostgreSQL, auth, upload and owner boundary', () => {
     })
   })
 
+  it('requires an allowlisted owner and a valid Idempotency-Key for v2 enrollment', async () => {
+    const owner = await login('+8613800000051')
+    const base = '/api/v1/media-assets/00000000-0000-0000-0000-000000000000/transcript/enroll-v2'
+    const auth = { authorization: `Bearer ${owner.accessToken}` }
+
+    const missingKey = await request(app.getHttpServer()).post(base).set(auth).expect(400)
+    expect(missingKey.body.code).toBe('invalid_request')
+
+    const shortKey = await request(app.getHttpServer()).post(base).set(auth).set('idempotency-key', 'short').expect(400)
+    expect(shortKey.body.code).toBe('invalid_request')
+
+    // Default V2_TRANSCRIPT_ALLOWLIST is empty (feature closed by default).
+    const notAllowlisted = await request(app.getHttpServer()).post(base).set(auth)
+      .set('idempotency-key', 'valid-idempotency-key-12345').expect(403)
+    expect(notAllowlisted.body.code).toBe('enrollment_not_allowlisted')
+  })
+
   it('keeps a revision-1 strict handoff failure terminal, private and playback-capable', async () => {
     const owner = await login('+8613800000026')
     const other = await login('+8613800000027')

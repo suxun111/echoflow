@@ -68,6 +68,9 @@ export const ApiErrorCodeSchema = z.enum([
   'transcript_incomplete',
   'transcript_timing_invalid',
   'transcript_publish_failed',
+  'transcript_pipeline_conflict',
+  'enrollment_not_allowlisted',
+  'enrollment_rejected',
   'processing_cancelled',
 ])
 export const ApiErrorSchema = z.object({

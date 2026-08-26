@@ -17,6 +17,9 @@ import type { Prisma, ProcessingRun, ProcessingStage, TranscriptVersion } from '
 export const G3_TRANSCRIPT_PIPELINES = ['g3-transcript-v1', 'g3-transcript-v2'] as const
 export type G3TranscriptPipeline = (typeof G3_TRANSCRIPT_PIPELINES)[number]
 
+export const G3_PIPELINE_VERSION_V2 = 'g3-transcript-v2' as const
+export const G3_PIPELINE_VERSION_V1 = 'g3-transcript-v1' as const
+
 export const ARBITER_CONFLICT_REASONS = ['other_pipeline_holds_media'] as const
 export const ARBITER_NOT_ELIGIBLE_REASONS = [
   'asset_not_found',

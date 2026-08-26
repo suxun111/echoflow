@@ -4,7 +4,7 @@ import {
   ActiveTranscriptViewSchema, MAX_UPLOAD_DURATION_MS, TranscriptWordSchema,
   type AuthUser, type MediaAssetView,
 } from '@online-learning/contracts'
-import { Prisma } from '@online-learning/database'
+import { G3_PIPELINE_VERSION_V2, Prisma, arbitrateTranscriptRun } from '@online-learning/database'
 import { ApiException } from '../../common/api-exception'
 import { CurrentUser } from '../../common/auth.decorators'
 import { SERVER_ENV } from '../../config/app-config.module'
@@ -25,6 +25,23 @@ function effectivePlanChunks<T extends RevisionedChunk>(chunks: readonly T[], re
     if (!current || chunk.planRevision > current.planRevision) selected.set(chunk.chunkIndex, chunk)
   }
   return [...selected.values()].sort((left, right) => left.chunkIndex - right.chunkIndex)
+}
+
+function mapEnrollmentNotEligible(reason: string): ApiException {
+  switch (reason) {
+    case 'asset_not_found':
+    case 'deleted':
+    case 'owner_mismatch':
+      return new ApiException(404, 'not_found', '媒体资产不存在')
+    case 'not_playable':
+      return new ApiException(409, 'media_not_playable', '媒体尚未准备好播放')
+    case 'duration_exceeds_limit':
+      return new ApiException(422, 'media_duration_unsupported', '当前仅支持时长不超过 60 分钟的视频')
+    case 'active_transcript_exists':
+      return new ApiException(409, 'transcript_active_conflict', '已存在可发布字幕，升级需另行处理')
+    default:
+      return new ApiException(422, 'enrollment_rejected', '当前资产不符合 v2 字幕处理条件')
+  }
 }
 
 function toView(asset: {
@@ -280,6 +297,43 @@ export class MediaAssetsController {
         idempotencyKey: eventKey, payload: { mediaAssetId, processingRunId: run.id },
       } })
       return { cancelled: true, processingRunId: run.id, duplicate: false }
+    }, { maxWait: 5_000, timeout: 15_000 })
+  }
+
+  @Post(':mediaAssetId/transcript/enroll-v2')
+  async enrollTranscriptV2(
+    @CurrentUser() user: AuthUser,
+    @Param('mediaAssetId') mediaAssetId: string,
+    @Headers('idempotency-key') idempotencyKey?: string,
+  ) {
+    if (!idempotencyKey || !/^[A-Za-z0-9._:-]{8,255}$/.test(idempotencyKey)) {
+      throw new ApiException(400, 'invalid_request', '需要有效的 Idempotency-Key')
+    }
+    if (!this.env.V2_TRANSCRIPT_ALLOWLIST.includes(user.id)) {
+      throw new ApiException(403, 'enrollment_not_allowlisted', '当前账号未获准使用 v2 字幕处理')
+    }
+    return this.database.$transaction(async (transaction) => {
+      const outcome = await arbitrateTranscriptRun(transaction, {
+        mediaAssetId,
+        pipelineVersion: G3_PIPELINE_VERSION_V2,
+        startStage: 'PLAYBACK_READY',
+        eventType: 'media.transcript_process.v2',
+        idempotencyKey: `transcript-enroll-v2:${user.id}:${mediaAssetId}:${idempotencyKey}`,
+        ownerId: user.id,
+        requireNoActiveTranscript: true,
+        maxDurationMs: MAX_UPLOAD_DURATION_MS,
+        requestKey: idempotencyKey,
+      })
+      switch (outcome.kind) {
+        case 'created':
+          return { enrolled: true, processingRunId: outcome.processingRunId, pipelineVersion: G3_PIPELINE_VERSION_V2, duplicate: false }
+        case 'idempotent':
+          return { enrolled: true, processingRunId: outcome.processingRunId, pipelineVersion: G3_PIPELINE_VERSION_V2, duplicate: true }
+        case 'conflict':
+          throw new ApiException(409, 'transcript_pipeline_conflict', '另一条字幕流水线正持有该媒体')
+        case 'not_eligible':
+          throw mapEnrollmentNotEligible(outcome.reason)
+      }
     }, { maxWait: 5_000, timeout: 15_000 })
   }
 }

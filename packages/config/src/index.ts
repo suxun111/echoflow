@@ -48,6 +48,9 @@ export const ServerEnvSchema = z.object({
   MOSS_CHUNK_OVERLAP_SECONDS: z.coerce.number().int().min(0).max(30).default(2),
   MOSS_AUDIO_URL_TTL_SECONDS: z.coerce.number().int().min(60).max(3600).default(15 * 60),
   MOSS_CALLBACK_MAX_AGE_SECONDS: z.coerce.number().int().min(30).max(900).default(5 * 60),
+  V2_TRANSCRIPT_ALLOWLIST: z.string().default('')
+    .transform((value) => value.split(',').map((id) => id.trim()).filter(Boolean))
+    .pipe(z.array(z.string().min(1))),
 }).superRefine((env, context) => {
   if (new URL(env.DATABASE_URL).pathname === '/online_learning') {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ['DATABASE_URL'], message: '历史 online_learning 数据库受保护，请使用独立 echoflow 数据库' })
