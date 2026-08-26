@@ -9,7 +9,7 @@
 | 字段 | 当前值 |
 |---|---|
 | Goal | `v0.5.0-alpha.1` |
-| Gate | `G1`、`G2` 已关闭；`G3` 保持打开。G3-A 已有真实 30 秒 MOSS 冒烟和一次真实约 5 分钟 EchoFlow → MOSS → ACTIVE 字幕发布；G3-B 的 C1 已在新授权私人长媒体上完成并正确失败关闭：8 个有效 Chunk 在最多一次 revision 1 后仍无唯一 segment-first 交接证据，未发布 ACTIVE。BE1 与 `g3-transcript-v2` 实施合同的独立复核均已通过；MFA S0 已在 D 盘 CPU 环境对手工放入的 `english_mfa` 模型/词典完成 inspect 和一次 40.459 秒非私人本机对齐，技术时间轴断言通过。因当前执行器拒绝启动精确临时文件清理命令，S0 的清理断言尚未得到证明，故 S0 保持打开且未开始 v2 产品实现。G3-C 的 30/60 分钟完整发布、故障恢复与容量矩阵尚未开始。 |
+| Gate | `G1`、`G2` 已关闭；`G3` 保持打开。G3-A 已有真实 30 秒 MOSS 冒烟和一次真实约 5 分钟 EchoFlow → MOSS → ACTIVE 字幕发布；G3-B 的 C1 已在新授权私人长媒体上完成并正确失败关闭：8 个有效 Chunk 在最多一次 revision 1 后仍无唯一 segment-first 交接证据，未发布 ACTIVE。BE1 与 `g3-transcript-v2` 实施合同的独立复核均已通过；MFA S0 已在 D 盘 CPU 环境完成模型/词典 inspect、40.459 秒非私人本机对齐、脱敏结构校验及清理后只读复核，现已关闭。尚未开始 v2 产品实现；G3-C 的 30/60 分钟完整发布、故障恢复与容量矩阵尚未开始。 |
 | 唯一 trunk | `master` |
 | V1 产品代码审计源点 | `42968ad` |
 | G0 文档基线 | `d01c67e`，已 fast-forward 至 master |
@@ -18,12 +18,12 @@
 | G2 实施分支 | `codex/g2-long-video-upload-playback-20260812`；最终代码验收锚点 `d08f6c6` |
 | G3 实施分支 | `codex/g3-moss-transcript-20260813`；基线提交 `0c3e2ee`（分支创建时的 `master`）；真实 5 分钟发布代码锚点 `8873c35` |
 | MOSS Provider 分支 | `codex/echoflow-provider-gateway-20260815`；当前输入范围校验锚点 `2f1c2ad`（Gateway 基线 `cdf6eb3`） |
-| WIP | G3“MOSS 与完整字幕原子发布”仍是唯一核心纵向闭环。C1 证明当前固定 MOSS Provider 的 `segment` 粒度无法在该样本的全部边界提供唯一交接证据；Provider 当前没有经验证的原生 `words[]`，而 EchoFlow 现有字级合并路径也不是严格的 handoff proof 验证器。[G3-BE1 跨分片交接证据增强任务合同](G3-BE1-HANDOFF-EVIDENCE-TASK-CONTRACT.md)及其[独立复核](G3-BE1-INDEPENDENT-REVIEW.md)，连同已复核的 [G3 v2 实施合同](G3-TRANSCRIPT-V2-IMPLEMENTATION-CONTRACT.md)，已冻结 Route B、失败关闭规则、实施切面与确定性验证边界。[MFA S0](G3-V2-MFA-IMPLEMENTATION-START-CONTRACT.md)的模型身份、CPU 对齐和脱敏结构验证已完成，详见 [脱敏运行证据](G3-V2-MFA-S0-VERIFICATION-EVIDENCE.md)；但用户需先清理固定的 D 盘 Probe/临时目录并由只读复核确认，才可关闭 S0。尚未开始 v2 代码/迁移或私人媒体处理。 |
+| WIP | G3“MOSS 与完整字幕原子发布”仍是唯一核心纵向闭环。C1 证明当前固定 MOSS Provider 的 `segment` 粒度无法在该样本的全部边界提供唯一交接证据；Provider 当前没有经验证的原生 `words[]`，而 EchoFlow 现有字级合并路径也不是严格的 handoff proof 验证器。[G3-BE1 跨分片交接证据增强任务合同](G3-BE1-HANDOFF-EVIDENCE-TASK-CONTRACT.md)及其[独立复核](G3-BE1-INDEPENDENT-REVIEW.md)，连同已复核的 [G3 v2 实施合同](G3-TRANSCRIPT-V2-IMPLEMENTATION-CONTRACT.md)，已冻结 Route B、失败关闭规则、实施切面与确定性验证边界。[MFA S0](G3-V2-MFA-IMPLEMENTATION-START-CONTRACT.md)已关闭，完整证据见 [脱敏运行证据](G3-V2-MFA-S0-VERIFICATION-EVIDENCE.md)；下一步仅能先创建/确认新的确定性 v2 代码实施任务合同，尚未开始迁移、代码或私人媒体处理。 |
 | 产品功能开发 | G2 已通过退出门；G3 实施中，G4–G5 继续冻结 |
 | Remote | `origin = https://github.com/suxun111/echoflow.git`；Private；外部恢复验证通过 |
-| 下一人工边界 | 用户先清理 [S0 证据](G3-V2-MFA-S0-VERIFICATION-EVIDENCE.md)列出的固定 D 盘 Probe、JSON、脚本和 `tmp\\mfa-s0`，保留模型、环境和脱敏侧车证据；随后只读复核清理与 C/D 隔离。S0 真正关闭后，仍须先确认一份新的确定性 v2 代码实施合同；不得直接开始 v2 产品实现、重跑 C1、创建 revision 2、放宽严格合并或处理私人媒体。 |
+| 下一人工边界 | S0 已关闭。下一项只允许基于既有 [G3 v2 实施合同](G3-TRANSCRIPT-V2-IMPLEMENTATION-CONTRACT.md)创建并确认一份新的确定性代码实施任务合同，明确第一批领域模型、迁移、Fake、路由与数据库测试的范围/验收；在该合同确认前，不得直接开始 v2 产品实现、重跑 C1、创建 revision 2、放宽严格合并或处理私人媒体。 |
 
-> S0 “只读复核”的完整含义以 2026-08-26 的 MFA S0 条目为准：目录枚举只是其中一项；还必须在冻结的 UTF-8 环境重跑两次 `mfa model inspect`，并复核本地 catalog 与已冻结哈希，才可关闭 S0。
+> S0 已于 2026-08-26 完成清理与冻结条件下的只读复核：目录枚举、两次 UTF-8 `mfa model inspect`、本地 catalog/哈希、CPU 约束、侧车证据和受限 C 盘路径均与已冻结证据一致。
 
 ## 2026-08-11 决策澄清
 
@@ -108,7 +108,14 @@
 - 侧车证据只保留版本、哈希、时长和计数，不含文本、音频、URL、任务标识或用户标识；未使用私人媒体、C1、MOSS、Docker、数据库、Worker/API 或 v2 产品代码；
 - 但 MFA 的 `--final_clean` 后仍有本次临时提取目录，且后续针对固定 D 盘临时对象的三次清理请求均在 Codex 执行器创建 PowerShell 前被安全策略拒绝。没有声称清理成功，因此 S0 不关闭；精确人工清理对象及恢复检查见 [S0 脱敏运行证据](G3-V2-MFA-S0-VERIFICATION-EVIDENCE.md)。
 
-- 人工清理后，S0 仍不能仅凭目录为空就关闭：必须在 Console UTF-8、`PYTHONIOENCODING=utf-8`、`PYTHONUTF8=1`、`TERM=dumb` 的冻结条件下重跑两次 `mfa model inspect`，并复核本地 catalog 的 tag/name/version/size 映射、已冻结 SHA-256 与受限 C 盘路径。只有该只读复核与清理证据同时成立，才可标记 S0 通过；不需要重跑非私人 Probe，除非误删模型、词典或侧车证据。
+- 人工清理后，S0 仍不能仅凭目录为空就关闭：必须在 Console UTF-8、`PYTHONIOENCODING=utf-8`、`PYTHONUTF8=1`、`TERM=dumb` 的冻结条件下重跑两次 `mfa model inspect`，并复核本地 catalog 的 tag/name/version/file-name、官方 release asset 字节数、已冻结 SHA-256 与受限 C 盘路径。catalog 的整数记录是 release id，不是文件大小。只有该只读复核与清理证据同时成立，才可标记 S0 通过；不需要重跑非私人 Probe，除非误删模型、词典或侧车证据。
+
+## 2026-08-26 G3 v2 MFA S0 清理与复核（通过并关闭）
+
+- 用户已清理本次 Probe 的源/规范化 WAV、`.lab`、对齐 JSON、两个临时脚本与仅本次作业的 `tmp\\mfa-s0`；只读枚举确认七个固定对象均不存在，同时 D 盘模型与脱敏侧车证据仍存在；
+- 受限 C 盘默认 MFA/Conda/Temp 路径仍均不存在。MFA `3.3.9` 在 Console UTF-8、`PYTHONIOENCODING=utf-8`、`PYTHONUTF8=1`、`TERM=dumb` 的冻结进程条件下，两次 `mfa model inspect` 均 exit `0`；
+- 本地 `english_mfa` 声学模型 `3.1.0` 与词典的 SHA-256、MFA catalog 的 tag/name/version/file-name 映射、官方 release asset 字节数，及 CPU Kaldi `5.5.1172` 的 `cpu_` build（无 CUDA/cuDNN/MAGMA）均与既有侧车和文档证据一致；catalog 的整数记录按 release id 解释，不作为文件大小比较；侧车仍报告 40.459 秒、107 个词级/309 个音素级区间、零无效/越界/非单调检查项；
+- 因此 S0 的模型 identity/来源链/许可边界、非私人 Probe、单并发本机对齐、脱敏证据、清理和复核断言同时成立，S0 通过并关闭。它不关闭 G3，也不证明真实播客、HandoffEvidence 或私人媒体能力；下一项仍须先建立新的 v2 确定性代码实施任务合同。
 
 ## 已完成证据
 
