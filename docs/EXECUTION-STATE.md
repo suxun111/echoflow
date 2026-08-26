@@ -21,7 +21,7 @@
 | WIP | G3“MOSS 与完整字幕原子发布”仍是唯一核心纵向闭环。C1 证明当前固定 MOSS Provider 的 `segment` 粒度无法在该样本的全部边界提供唯一交接证据；Provider 当前没有经验证的原生 `words[]`，而 EchoFlow 现有字级合并路径也不是严格的 handoff proof 验证器。[G3-BE1 跨分片交接证据增强任务合同](G3-BE1-HANDOFF-EVIDENCE-TASK-CONTRACT.md)及其[独立复核](G3-BE1-INDEPENDENT-REVIEW.md)，连同已复核的 [G3 v2 实施合同](G3-TRANSCRIPT-V2-IMPLEMENTATION-CONTRACT.md)，已冻结 Route B、失败关闭规则、实施切面与确定性验证边界。[MFA S0](G3-V2-MFA-IMPLEMENTATION-START-CONTRACT.md)已关闭，完整证据见 [脱敏运行证据](G3-V2-MFA-S0-VERIFICATION-EVIDENCE.md)；下一步仅能先创建/确认新的确定性 v2 代码实施任务合同，尚未开始迁移、代码或私人媒体处理。 |
 | 产品功能开发 | G2 已通过退出门；G3 实施中，G4–G5 继续冻结 |
 | Remote | `origin = https://github.com/suxun111/echoflow.git`；Private；外部恢复验证通过 |
-| 下一人工边界 | F1 已实施并推送（`06a9be7`）。[v2 运行态实施启动合同草案](G3-V2-RUNTIME-IMPLEMENTATION-START-CONTRACT.md)已起草：下一批冻结 `TranscriptRunArbiter`、v2 显式 enrollment、v2 Worker/Outbox/API 路由与受控对象生命周期，仅用注入式 Fake 与测试基础设施；对齐器（建议本地 MFA 3.3.9）、网络/回调（建议纯轮询）、数据生命周期（HANDOFF_AUDIO≈24h / ALIGNMENT_RAW≤7d）、资源与并发、proof key 生产来源与 enrollment 隐私告知仍待用户确认。确认 F2 前不得开始运行态实现、接入真实对齐器或处理私人媒体。 |
+| 下一人工边界 | F1 已实施并推送（`06a9be7`）。[v2 运行态实施启动合同](G3-V2-RUNTIME-IMPLEMENTATION-START-CONTRACT.md)已确认。用户确认 F2 范围：仅实现 TranscriptRunArbiter、显式 enrollment、v2 Worker/Outbox/API 路由、Fake 和确定性测试；不接入真实 MFA/MOSS、私人媒体、对象存储实际读写、外部网络、生产密钥或公网 callback。对齐器（建议本地 MFA 3.3.9）、网络/回调（建议纯轮询）、数据生命周期（HANDOFF_AUDIO≈24h / ALIGNMENT_RAW≤7d）、资源与并发、proof key 生产来源与 enrollment 隐私告知仍待后续合同单独确认。F2 只允许运行态接线到 Fake 与测试，不得接入真实对齐器、真实对象读写或生产密钥。 |
 
 > S0 已于 2026-08-26 完成清理与冻结条件下的只读复核：目录枚举、两次 UTF-8 `mfa model inspect`、本地 catalog/哈希、CPU 约束、侧车证据和受限 C 盘路径均与已冻结证据一致。
 
@@ -141,6 +141,11 @@
 
 - F1 完成后，已起草 [v2 运行态实施启动合同草案](G3-V2-RUNTIME-IMPLEMENTATION-START-CONTRACT.md)，冻结下一批工作：`TranscriptRunArbiter`、v2 显式 enrollment、v2 Worker/Outbox/API 路由与受控对象生命周期（`HANDOFF_AUDIO`≈24h、`ALIGNMENT_RAW`≤7d），且仅用注入式 Fake 与测试基础设施。
 - 仍未确认（第 3 节待决记录，确认 F2 不等于确认它们）：本地 MFA 3.3.9 对齐器、纯轮询无回调、数据生命周期精确值、CPU/单并发资源预算、生产 proof key 来源与 enrollment 隐私告知。未经确认不得开始运行态实现、接入真实对齐器或处理私人媒体。
+
+## 2026-08-26 G3 v2 运行态实施启动合同（已确认）
+
+- 用户已确认 F2 范围：仅实现 TranscriptRunArbiter、显式 enrollment、v2 Worker/Outbox/API 路由、Fake 和确定性测试；不接入真实 MFA/MOSS、私人媒体、对象存储实际读写、外部网络、生产密钥或公网 callback；数据留存、回调、资源、密钥和隐私告知方案后续另行确认；第 3 节除 F2 范围外的建议仅为待决记录。
+- 合同状态已改为“已确认”。实施顺序固定为：1) Arbiter（v1/v2 互斥、幂等、租约 fencing）→ 2) Enrollment（owner/allowlist/Idempotency-Key/重复与冲突）→ 3) Worker/Outbox 路由到 Fake（恢复/取消/迟到/失败关闭）→ 4) API 脱敏状态 → 5) 对象生命周期策略+Fake 测试 → 6) 全仓 lint/test/build + 独立审查 + 提交。
 
 ## 已完成证据
 

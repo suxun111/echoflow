@@ -1,9 +1,10 @@
-# EchoFlow G3 v2 运行态实施启动合同（草案）
+# EchoFlow G3 v2 运行态实施启动合同
 
 创建日期：2026-08-26
-状态：**待用户确认；本文件只冻结拟议的下一批实现边界，不授权创建 migration、修改代码、启动服务或处理任何媒体。**
+确认日期：2026-08-26
+状态：**已确认。用户确认 F2 范围：仅实现 TranscriptRunArbiter、显式 enrollment、v2 Worker/Outbox/API 路由、Fake 和确定性测试；不接入真实 MFA/MOSS、私人媒体、对象存储实际读写、外部网络、生产密钥或公网 callback。数据留存、回调、资源、密钥和隐私告知方案后续另行确认。第 3 节除“下一批范围”外的所有建议仅为待决记录。**
 
-在用户确认本合同的 F2 范围前，**不得开始 v2 运行态实现**，也不得把本草案当作 Route B 已落地、真实对齐已接入或 G3 通过证据。
+本确认只冻结 F2 的运行态实现边界（仅 Fake/测试基础设施），不授权真实对齐器、私人媒体、对象存储实际读写、生产密钥或公网 callback。
 
 上游依据：[确定性基础层启动合同](G3-V2-DETERMINISTIC-FOUNDATION-START-CONTRACT.md)（F1 已确认并实施）、[G3 `g3-transcript-v2` 实施合同](G3-TRANSCRIPT-V2-IMPLEMENTATION-CONTRACT.md)、[MFA S0 运行证据](G3-V2-MFA-S0-VERIFICATION-EVIDENCE.md)、[执行状态](EXECUTION-STATE.md)。
 
