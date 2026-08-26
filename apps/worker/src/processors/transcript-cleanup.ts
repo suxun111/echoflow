@@ -1,5 +1,6 @@
 import { Prisma, type PrismaClient } from '@online-learning/database'
 import type { MultipartStorageProvider } from '@online-learning/storage'
+import { isTranscriptObjectCleanupEligible, TRANSCRIPT_OBJECT_KINDS } from '../transcript/object-lifecycle'
 
 function metadataRunId(value: Prisma.JsonValue | null) {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -22,7 +23,7 @@ export async function cleanupTranscriptObjects(
   await storage.ensureVersioning()
   const candidates = await database.mediaObject.findMany({
     where: {
-      kind: { in: ['NORMALIZED_AUDIO', 'AUDIO_CHUNK', 'ASR_RAW'] },
+      kind: { in: [...TRANSCRIPT_OBJECT_KINDS] },
       purgedAt: null,
       OR: [
         { deletedAt: { not: null } },
@@ -47,11 +48,7 @@ export async function cleanupTranscriptObjects(
         const run = await transaction.processingRun.findFirst({
           where: { id: processingRunId, mediaAssetId: current.mediaAssetId }, select: { status: true },
         })
-        if (!run || !['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(run.status)) return null
-        const retentionMs = current.kind === 'ASR_RAW'
-          ? 7 * 24 * 60 * 60_000
-          : 24 * 60 * 60_000
-        if (current.createdAt.getTime() > now.getTime() - retentionMs) return null
+        if (!isTranscriptObjectCleanupEligible(current, run, now)) return null
         if (!current.deletedAt) {
           const tombstoned = await transaction.mediaObject.updateMany({
             where: { id: current.id, versionId: current.versionId, deletedAt: null, purgedAt: null },
