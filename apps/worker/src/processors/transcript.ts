@@ -13,6 +13,26 @@ import { MossError, type MossAdapter, type MossResult } from '../moss/adapter'
 import { parseSilenceCenters, parseSilenceWindows, planAudioChunks, planBoundaryRepair } from '../transcript/chunks'
 import { G3_PIPELINE_VERSION } from '../transcript/constants'
 import { buildTranscript, TranscriptValidationError, type TranscriptRepairDiagnostic } from '../transcript/merge'
+import {
+  PIPELINE_VERSION_V2,
+  ZERO_H_COUNTS,
+  assertPublishable,
+  buildAlignmentIdempotencyKey,
+  createCorrelationHandle,
+  resolveAlignmentHandoff,
+  resolveStrictHandoff,
+  validateHandoffPair,
+  validateStrictSegment,
+  type AlignmentAdapter,
+  type ChunkIdentity,
+  type EvidenceIdentityView,
+  type ExpectedEvidenceIdentity,
+  type HCounts,
+  type HandoffChunkView,
+  type MaterializedEvidence,
+  type ProofDigestService,
+  type StrictAssessmentInputProvider,
+} from '../handoff'
 
 const execFileAsync = promisify(execFile)
 const noProxyEnvironment = {
@@ -138,6 +158,16 @@ export async function cancelExternalTranscriptJobs(
   return { skipped: false, cancelled }
 }
 
+export type V2HandoffOptions = {
+  alignment: AlignmentAdapter
+  proof: ProofDigestService
+  assessment: StrictAssessmentInputProvider
+  /** Synthetic, non-content method/model/config digests for alignment jobs. */
+  methodDigest: string
+  modelDigest: string
+  configDigest: string
+}
+
 type TranscriptProcessorOptions = {
   database: PrismaClient
   storage: MultipartStorageProvider
@@ -145,6 +175,8 @@ type TranscriptProcessorOptions = {
   env: ServerEnv
   workerId: string
   now?: () => Date
+  /** Present only when the v2 HANDOFF_EVIDENCING route is enabled. */
+  handoff?: V2HandoffOptions
 }
 
 async function checksum(bytes: Buffer) {
@@ -953,12 +985,16 @@ export function createTranscriptProcessor(options: TranscriptProcessorOptions) {
       if (released.count !== 1) throw new TranscriptLeaseLostError('transcript_lease_lost')
       return false
     }
+    const runMeta = await options.database.processingRun.findUniqueOrThrow({
+      where: { id: run.id }, select: { pipelineVersion: true },
+    })
+    const nextStage = runMeta.pipelineVersion === PIPELINE_VERSION_V2 ? 'HANDOFF_EVIDENCING' : 'MERGING'
     const advanced = await options.database.processingRun.updateMany({
       where: {
         id: run.id, status: 'PROCESSING', leaseOwner: leaseOwner(),
         leaseExpiresAt: { gt: now() },
       },
-      data: { stage: 'MERGING', leaseExpiresAt: new Date(now().getTime() + 5 * 60_000) },
+      data: { stage: nextStage, leaseExpiresAt: new Date(now().getTime() + 5 * 60_000) },
     })
     if (advanced.count !== 1) throw new TranscriptLeaseLostError('transcript_lease_lost')
     return true
@@ -1089,6 +1125,456 @@ export function createTranscriptProcessor(options: TranscriptProcessorOptions) {
     return 'created'
   }
 
+  type EvidencingChunk = {
+    id: string
+    processingRunId: string
+    planRevision: number
+    chunkIndex: number
+    status: string
+    resultObjectKey: string | null
+    resultVersionId: string | null
+    resultChecksum: string | null
+    startMs: number
+    endMs: number
+  }
+
+  type NormalizedIdentity = { versionId: string | null; checksum: string | null }
+
+  function toHandoffChunkView(chunk: EvidencingChunk): HandoffChunkView {
+    return {
+      id: chunk.id,
+      processingRunId: chunk.processingRunId,
+      planRevision: chunk.planRevision,
+      chunkIndex: chunk.chunkIndex,
+      status: chunk.status,
+      resultObjectKey: chunk.resultObjectKey,
+      resultVersionId: chunk.resultVersionId,
+      resultChecksum: chunk.resultChecksum,
+      startMs: chunk.startMs,
+      endMs: chunk.endMs,
+    }
+  }
+
+  async function readNormalizedIdentity(run: { id: string; mediaAssetId: string }): Promise<NormalizedIdentity> {
+    const normalized = await options.database.mediaObject.findFirst({
+      where: {
+        mediaAssetId: run.mediaAssetId, kind: 'NORMALIZED_AUDIO', deletedAt: null,
+        metadata: { path: ['processingRunId'], equals: run.id },
+      },
+      orderBy: { createdAt: 'desc' },
+      select: { versionId: true, checksumSha256: true },
+    })
+    return { versionId: normalized?.versionId ?? null, checksum: normalized?.checksumSha256 ?? null }
+  }
+
+  function buildExpectedIdentity(
+    runId: string,
+    handoff: { id: string; planRevision: number; logicalHandoffIndex: number },
+    previous: EvidencingChunk,
+    next: EvidencingChunk,
+    normalized: NormalizedIdentity,
+  ): ExpectedEvidenceIdentity {
+    const windowStartMs = Math.min(previous.endMs, next.startMs)
+    const windowEndMs = Math.max(previous.endMs, next.startMs) || windowStartMs + 1
+    const digest = (fallback: string) => options.handoff ? fallback : ''
+    return {
+      handoffId: handoff.id,
+      processingRunId: runId,
+      planRevision: handoff.planRevision,
+      logicalHandoffIndex: handoff.logicalHandoffIndex,
+      previousChunkId: previous.id,
+      nextChunkId: next.id,
+      previousAsrObjectKey: previous.resultObjectKey ?? '',
+      previousAsrVersionId: previous.resultVersionId ?? null,
+      previousAsrChecksum: previous.resultChecksum ?? null,
+      nextAsrObjectKey: next.resultObjectKey ?? '',
+      nextAsrVersionId: next.resultVersionId ?? null,
+      nextAsrChecksum: next.resultChecksum ?? null,
+      normalizedAudioVersionId: normalized.versionId,
+      normalizedAudioChecksum: normalized.checksum,
+      windowStartMs,
+      windowEndMs,
+      methodDigest: options.handoff?.methodDigest ?? digest('m'),
+      modelDigest: options.handoff?.modelDigest ?? digest('m'),
+      configDigest: options.handoff?.configDigest ?? digest('c'),
+      alignmentPolicyDigest: null,
+    }
+  }
+
+  async function upsertHandoff(
+    runId: string,
+    planRevision: number,
+    handoffIndex: number,
+    previous: EvidencingChunk,
+    next: EvidencingChunk,
+  ) {
+    return options.database.processingHandoff.upsert({
+      where: {
+        processingRunId_planRevision_logicalHandoffIndex: {
+          processingRunId: runId, planRevision, logicalHandoffIndex: handoffIndex,
+        },
+      },
+      create: {
+        processingRunId: runId, planRevision, logicalHandoffIndex: handoffIndex,
+        previousChunkId: previous.id, nextChunkId: next.id, status: 'ASSESSING',
+      },
+      update: {},
+    })
+  }
+
+  type HandoffAssessmentRecord = {
+    decision: string
+    decisionCode: string
+    evidenceType: string
+    inputChecksum: string
+    windowStartMs: number
+    windowEndMs: number
+  }
+
+  async function materializeEvidence(
+    run: { id: string },
+    record: { id: string },
+    assessment: HandoffAssessmentRecord,
+    evidence: MaterializedEvidence,
+  ) {
+    await options.database.$transaction(async (transaction) => {
+      const fenced = await transaction.processingRun.updateMany({
+        where: { id: run.id, status: 'PROCESSING', leaseOwner: leaseOwner(), leaseExpiresAt: { gt: now() } },
+        data: { leaseExpiresAt: new Date(now().getTime() + 5 * 60_000) },
+      })
+      if (fenced.count !== 1) throw new TranscriptLeaseLostError('transcript_lease_lost')
+      await transaction.handoffAssessment.create({
+        data: {
+          handoffId: record.id,
+          decision: assessment.decision,
+          decisionCode: assessment.decisionCode,
+          evidenceType: assessment.evidenceType,
+          inputChecksum: assessment.inputChecksum,
+          windowStartMs: assessment.windowStartMs,
+          windowEndMs: assessment.windowEndMs,
+        },
+      })
+      await transaction.handoffEvidence.create({
+        data: {
+          handoffId: record.id,
+          planRevision: evidence.planRevision,
+          logicalHandoffIndex: evidence.logicalHandoffIndex,
+          decision: evidence.decision,
+          decisionCode: evidence.decisionCode,
+          evidenceType: evidence.evidenceType,
+          schemaVersion: evidence.schemaVersion,
+          pipelineVersion: evidence.pipelineVersion,
+          previousChunkId: evidence.previousChunkId,
+          nextChunkId: evidence.nextChunkId,
+          normalizedAudioVersionId: evidence.normalizedAudioVersionId,
+          normalizedAudioChecksum: evidence.normalizedAudioChecksum,
+          previousAsrObjectKey: evidence.previousAsrObjectKey,
+          previousAsrVersionId: evidence.previousAsrVersionId,
+          previousAsrChecksum: evidence.previousAsrChecksum,
+          nextAsrObjectKey: evidence.nextAsrObjectKey,
+          nextAsrVersionId: evidence.nextAsrVersionId,
+          nextAsrChecksum: evidence.nextAsrChecksum,
+          rawObjectKey: evidence.rawObjectKey,
+          rawVersionId: evidence.rawVersionId,
+          rawChecksum: evidence.rawChecksum,
+          methodProvider: evidence.methodProvider,
+          methodVersion: evidence.methodVersion,
+          modelRevision: evidence.modelRevision,
+          alignmentPolicyDigest: evidence.alignmentPolicyDigest,
+          windowStartMs: evidence.windowStartMs,
+          windowEndMs: evidence.windowEndMs,
+          candidateCount: evidence.candidateCount,
+          anchorCount: evidence.anchorCount,
+          coverageMs: evidence.coverageMs,
+          proofKeyVersion: evidence.proofKeyVersion,
+          proofDigest: evidence.proofDigest,
+        },
+      })
+      await transaction.processingHandoff.updateMany({
+        where: { id: record.id, status: { not: 'EVIDENCED' } },
+        data: { status: 'EVIDENCED', completedAt: now(), errorCode: null },
+      })
+    }, { maxWait: 10_000, timeout: 30_000 })
+  }
+
+  async function failHandoff(run: { id: string }, record: { id: string }, decisionCode: string) {
+    await options.database.$transaction(async (transaction) => {
+      const fenced = await transaction.processingRun.updateMany({
+        where: { id: run.id, status: 'PROCESSING', leaseOwner: leaseOwner(), leaseExpiresAt: { gt: now() } },
+        data: { leaseExpiresAt: new Date(now().getTime() + 5 * 60_000) },
+      })
+      if (fenced.count !== 1) throw new TranscriptLeaseLostError('transcript_lease_lost')
+      await transaction.processingHandoff.updateMany({
+        where: { id: record.id },
+        data: { status: 'FAILED', failedAt: now(), errorCode: decisionCode },
+      })
+      await transaction.processingRun.updateMany({
+        where: { id: run.id, status: 'PROCESSING', leaseOwner: leaseOwner() },
+        data: { status: 'FAILED', failedAt: now(), errorCode: 'transcript_incomplete', leaseOwner: null, leaseExpiresAt: null },
+      })
+    }, { maxWait: 10_000, timeout: 30_000 })
+  }
+
+  async function resolveAlignmentAt(
+    run: { id: string },
+    record: { id: string; planRevision: number; logicalHandoffIndex: number },
+    expected: ExpectedEvidenceIdentity,
+    assessment: HandoffAssessmentRecord,
+  ): Promise<'accepted' | 'waiting' | 'failed'> {
+    const handoff = options.handoff!
+    let job = await options.database.alignmentJob.findUnique({ where: { handoffId: record.id } })
+    if (!job) {
+      const idempotencyKey = buildAlignmentIdempotencyKey({
+        processingRunId: run.id,
+        planRevision: record.planRevision,
+        logicalHandoffIndex: record.logicalHandoffIndex,
+        previousChunkId: expected.previousChunkId,
+        previousAsrObjectKey: expected.previousAsrObjectKey,
+        previousAsrVersionId: expected.previousAsrVersionId,
+        previousAsrChecksum: expected.previousAsrChecksum,
+        nextChunkId: expected.nextChunkId,
+        nextAsrObjectKey: expected.nextAsrObjectKey,
+        nextAsrVersionId: expected.nextAsrVersionId,
+        nextAsrChecksum: expected.nextAsrChecksum,
+        normalizedAudioVersionId: expected.normalizedAudioVersionId,
+        normalizedAudioChecksum: expected.normalizedAudioChecksum,
+        windowStartMs: expected.windowStartMs,
+        windowEndMs: expected.windowEndMs,
+        methodDigest: expected.methodDigest,
+        modelDigest: expected.modelDigest,
+        configDigest: expected.configDigest,
+      })
+      const correlationHandle = createCorrelationHandle()
+      try {
+        const submission = await handoff.alignment.submit({
+          idempotencyKey,
+          correlationHandle,
+          pipelineVersion: PIPELINE_VERSION_V2,
+          windowStartMs: expected.windowStartMs,
+          windowEndMs: expected.windowEndMs,
+          methodDigest: expected.methodDigest,
+          modelDigest: expected.modelDigest,
+          configDigest: expected.configDigest,
+        })
+        job = await options.database.alignmentJob.create({
+          data: {
+            handoffId: record.id, idempotencyKey, correlationHandle,
+            status: 'SUBMITTED', attempt: 1, externalJobId: submission.externalJobId,
+            windowStartMs: expected.windowStartMs, windowEndMs: expected.windowEndMs,
+            methodDigest: expected.methodDigest, modelDigest: expected.modelDigest, configDigest: expected.configDigest,
+            submittedAt: now(),
+          },
+        })
+      } catch (error) {
+        job = await options.database.alignmentJob.findUnique({ where: { handoffId: record.id } })
+        if (!job) throw error
+      }
+    }
+
+    if (job.status === 'SUCCEEDED') {
+      const existing = await options.database.handoffEvidence.findUnique({ where: { handoffId: record.id } })
+      if (existing) return 'accepted'
+    }
+    if (!job.externalJobId) return 'waiting'
+
+    const status = await handoff.alignment.query(job.externalJobId)
+    if (status.state === 'PENDING' || status.state === 'RUNNING') {
+      await options.database.alignmentJob.updateMany({
+        where: { id: job.id, externalJobId: job.externalJobId },
+        data: { status: 'POLLING', nextPollAt: new Date(now().getTime() + 1_000) },
+      })
+      return 'waiting'
+    }
+    if (status.state === 'FAILED' || status.state === 'CANCELLED') {
+      await failHandoff(run, record, status.code ?? 'alignment_failed')
+      return 'failed'
+    }
+    const result = await handoff.alignment.read(job.externalJobId)
+    const resolution = resolveAlignmentHandoff({
+      expected,
+      result,
+      raw: { objectKey: 'raw-sentinel', versionId: 'raw-sentinel-v1', checksum: '0'.repeat(64) },
+      proof: handoff.proof,
+      methodProvider: 'mfa',
+      methodVersion: '3.3.9',
+      modelRevision: 'english_mfa-3.1.0',
+    })
+    if (resolution.kind === 'accepted') {
+      await options.database.alignmentJob.updateMany({
+        where: { id: job.id },
+        data: { status: 'SUCCEEDED', completedAt: now(), nextPollAt: null },
+      })
+      await materializeEvidence(run, record, assessment, resolution.evidence)
+      return 'accepted'
+    }
+    await options.database.alignmentJob.updateMany({
+      where: { id: job.id },
+      data: { status: 'FAILED', failedAt: now(), errorCode: resolution.decisionCode },
+    })
+    await failHandoff(run, record, resolution.decisionCode)
+    return 'failed'
+  }
+
+  async function resolveHandoffAt(
+    run: { id: string },
+    planRevision: number,
+    handoffIndex: number,
+    previous: EvidencingChunk,
+    next: EvidencingChunk,
+    normalized: NormalizedIdentity,
+  ): Promise<'accepted' | 'waiting' | 'failed'> {
+    const handoff = options.handoff!
+    validateHandoffPair(previous as ChunkIdentity, next as ChunkIdentity, planRevision)
+    const record = await upsertHandoff(run.id, planRevision, handoffIndex, previous, next)
+    if (record.status === 'EVIDENCED') return 'accepted'
+    if (record.status === 'FAILED' || record.status === 'CANCELLED') return 'failed'
+
+    const expected = buildExpectedIdentity(run.id, record, previous, next, normalized)
+    const strictInput = handoff.assessment.build(toHandoffChunkView(previous), toHandoffChunkView(next), planRevision)
+    const strict = validateStrictSegment(strictInput)
+    const assessment: HandoffAssessmentRecord = {
+      decision: strict.decision,
+      decisionCode: strict.decisionCode,
+      evidenceType: strict.evidenceType,
+      inputChecksum: strictInput.inputChecksum,
+      windowStartMs: strict.windowStartMs,
+      windowEndMs: strict.windowEndMs,
+    }
+    const resolution = resolveStrictHandoff(expected, strict, handoff.proof)
+    if (resolution.kind === 'accepted') {
+      await materializeEvidence(run, record, assessment, resolution.evidence)
+      return 'accepted'
+    }
+    if (resolution.kind === 'rejected') {
+      await options.database.handoffAssessment.create({
+        data: {
+          handoffId: record.id,
+          decision: assessment.decision,
+          decisionCode: assessment.decisionCode,
+          evidenceType: assessment.evidenceType,
+          inputChecksum: assessment.inputChecksum,
+          windowStartMs: assessment.windowStartMs,
+          windowEndMs: assessment.windowEndMs,
+        },
+      })
+      await failHandoff(run, record, resolution.decisionCode)
+      return 'failed'
+    }
+    return resolveAlignmentAt(run, record, expected, assessment)
+  }
+
+  async function handoffEvidencing(
+    run: { id: string; mediaAssetId: string; mediaAsset: { ownerId: string } },
+  ): Promise<'completed' | 'waiting' | 'failed'> {
+    if (!options.handoff) return 'completed'
+    const plan = await currentPlanChunks(run.id)
+    const chunks = plan.chunks as unknown as EvidencingChunk[]
+    if (chunks.length <= 1) {
+      const advanced = await withRunFence(run.id, (transaction) => transaction.processingRun.updateMany({
+        where: { id: run.id, status: 'PROCESSING', leaseOwner: leaseOwner(), leaseExpiresAt: { gt: now() } },
+        data: { stage: 'MERGING', leaseExpiresAt: new Date(now().getTime() + 5 * 60_000) },
+      }))
+      if (advanced.count !== 1) throw new TranscriptLeaseLostError('transcript_lease_lost')
+      return 'completed'
+    }
+
+    const normalized = await readNormalizedIdentity(run)
+    let waiting = false
+    for (let i = 0; i < chunks.length - 1; i += 1) {
+      const previous = chunks[i]!
+      const next = chunks[i + 1]!
+      const result = await resolveHandoffAt(run, plan.revision, i, previous, next, normalized)
+      if (result === 'waiting') waiting = true
+      if (result === 'failed') return 'failed'
+    }
+    if (waiting) {
+      const released = await options.database.processingRun.updateMany({
+        where: { id: run.id, status: 'PROCESSING', leaseOwner: leaseOwner(), leaseExpiresAt: { gt: now() } },
+        data: { leaseOwner: null, leaseExpiresAt: null },
+      })
+      if (released.count !== 1) throw new TranscriptLeaseLostError('transcript_lease_lost')
+      return 'waiting'
+    }
+
+    const advanced = await withRunFence(run.id, (transaction) => transaction.processingRun.updateMany({
+      where: { id: run.id, status: 'PROCESSING', leaseOwner: leaseOwner(), leaseExpiresAt: { gt: now() } },
+      data: { stage: 'MERGING', leaseExpiresAt: new Date(now().getTime() + 5 * 60_000) },
+    }))
+    if (advanced.count !== 1) throw new TranscriptLeaseLostError('transcript_lease_lost')
+    return 'completed'
+  }
+
+  async function v2HandoffCounts(
+    transaction: Prisma.TransactionClient,
+    run: { id: string; mediaAssetId: string },
+    planRevision: number,
+  ): Promise<HCounts> {
+    const normalizedRow = await transaction.mediaObject.findFirst({
+      where: {
+        mediaAssetId: run.mediaAssetId, kind: 'NORMALIZED_AUDIO', deletedAt: null,
+        metadata: { path: ['processingRunId'], equals: run.id },
+      },
+      orderBy: { createdAt: 'desc' },
+      select: { versionId: true, checksumSha256: true },
+    })
+    const normalized: NormalizedIdentity = { versionId: normalizedRow?.versionId ?? null, checksum: normalizedRow?.checksumSha256 ?? null }
+    const chunks = await transaction.processingChunk.findMany({
+      where: { processingRunId: run.id, planRevision: { lte: planRevision } },
+      orderBy: [{ chunkIndex: 'asc' }, { planRevision: 'desc' }],
+      select: {
+        id: true, processingRunId: true, planRevision: true, chunkIndex: true, status: true,
+        resultObjectKey: true, resultVersionId: true, resultChecksum: true, startMs: true, endMs: true,
+      },
+    })
+    const effective = effectivePlanChunks(chunks, planRevision)
+    const effectiveChunkCount = effective.length
+    const handoffs = await transaction.processingHandoff.findMany({
+      where: { processingRunId: run.id, planRevision },
+      include: { finalEvidence: true },
+      orderBy: { logicalHandoffIndex: 'asc' },
+    })
+    const handoffInputs = handoffs.map((handoff) => {
+      const previous = effective.find((chunk) => chunk.id === handoff.previousChunkId)!
+      const next = effective.find((chunk) => chunk.id === handoff.nextChunkId)!
+      const expected = buildExpectedIdentity(run.id, handoff, previous, next, normalized)
+      const evidence: EvidenceIdentityView | null = handoff.finalEvidence ? {
+        planRevision: handoff.finalEvidence.planRevision,
+        logicalHandoffIndex: handoff.finalEvidence.logicalHandoffIndex,
+        decision: handoff.finalEvidence.decision as EvidenceIdentityView['decision'],
+        decisionCode: handoff.finalEvidence.decisionCode,
+        evidenceType: handoff.finalEvidence.evidenceType as EvidenceIdentityView['evidenceType'],
+        previousChunkId: handoff.finalEvidence.previousChunkId,
+        nextChunkId: handoff.finalEvidence.nextChunkId,
+        previousAsrObjectKey: handoff.finalEvidence.previousAsrObjectKey,
+        previousAsrVersionId: handoff.finalEvidence.previousAsrVersionId,
+        previousAsrChecksum: handoff.finalEvidence.previousAsrChecksum,
+        nextAsrObjectKey: handoff.finalEvidence.nextAsrObjectKey,
+        nextAsrVersionId: handoff.finalEvidence.nextAsrVersionId,
+        nextAsrChecksum: handoff.finalEvidence.nextAsrChecksum,
+        normalizedAudioVersionId: handoff.finalEvidence.normalizedAudioVersionId,
+        normalizedAudioChecksum: handoff.finalEvidence.normalizedAudioChecksum,
+        windowStartMs: handoff.finalEvidence.windowStartMs,
+        windowEndMs: handoff.finalEvidence.windowEndMs,
+        methodProvider: handoff.finalEvidence.methodProvider,
+        methodVersion: handoff.finalEvidence.methodVersion,
+        modelRevision: handoff.finalEvidence.modelRevision,
+        alignmentPolicyDigest: handoff.finalEvidence.alignmentPolicyDigest,
+      } : null
+      return {
+        logicalHandoffIndex: handoff.logicalHandoffIndex,
+        firstAcceptedRevision: (handoff.planRevision === 0 ? 0 : 1) as 0 | 1,
+        expected,
+        evidence,
+      }
+    })
+    return assertPublishable({
+      runCancelled: false,
+      activePlanRevision: planRevision,
+      effectiveChunkCount,
+      handoffs: handoffInputs,
+    })
+  }
+
   async function publish(run: {
     id: string; ownerId: string; mediaAssetId: string; pipelineVersion: string
     mediaAsset: {
@@ -1186,12 +1672,18 @@ export function createTranscriptProcessor(options: TranscriptProcessorOptions) {
         throw new TranscriptLeaseLostError('transcript_publish_fence_lost')
       }
       const last = await transaction.transcriptVersion.aggregate({ where: { mediaAssetId: run.mediaAssetId }, _max: { version: true } })
+      const hCounts = run.pipelineVersion === PIPELINE_VERSION_V2
+        ? await v2HandoffCounts(transaction, run, plan.revision)
+        : ZERO_H_COUNTS
       const transcript = await transaction.transcriptVersion.create({
         data: {
           mediaAssetId: run.mediaAssetId, processingRunId: run.id,
           version: (last._max.version ?? 0) + 1, language: 'en', status: 'BUILDING',
           pipelineVersion: run.pipelineVersion, modelVersion, planRevision: plan.revision,
           durationMs: run.mediaAsset.durationMs!, cueCount: cues.length,
+          hTotal: hCounts.hTotal, hUnique: hCounts.hUnique, hR1: hCounts.hR1,
+          hUnresolved: hCounts.hUnresolved, hSegment: hCounts.hSegment,
+          hProviderWord: hCounts.hProviderWord, hAlignment: hCounts.hAlignment,
           cues: { create: cues.map((cue) => ({
             order: cue.order, startMs: cue.startMs, endMs: cue.endMs, text: cue.text,
             words: cue.words as unknown as Prisma.InputJsonValue,
@@ -1234,7 +1726,8 @@ export function createTranscriptProcessor(options: TranscriptProcessorOptions) {
     await ensureVersionedStorage()
     const claimed = await options.database.processingRun.updateMany({
       where: {
-        id: job.processingRunId, mediaAssetId: job.mediaAssetId, pipelineVersion: G3_PIPELINE_VERSION,
+        id: job.processingRunId, mediaAssetId: job.mediaAssetId,
+        pipelineVersion: options.handoff ? { in: [G3_PIPELINE_VERSION, PIPELINE_VERSION_V2] } : G3_PIPELINE_VERSION,
         status: { in: ['QUEUED', 'PROCESSING', 'VALIDATING'] },
         OR: [{ leaseOwner: null }, { leaseExpiresAt: { lt: now() } }],
       },
@@ -1257,6 +1750,14 @@ export function createTranscriptProcessor(options: TranscriptProcessorOptions) {
       if (['PLAYBACK_READY', 'AUDIO_EXTRACTING', 'CHUNKING'].includes(run.stage)) await prepareAudio(run, directory)
       const refreshed = await options.database.processingRun.findUniqueOrThrow({ where: { id: run.id } })
       if (refreshed.stage === 'TRANSCRIBING' && !await transcribe(run, directory)) return { skipped: false, waiting: true }
+      if (options.handoff && run.pipelineVersion === PIPELINE_VERSION_V2) {
+        const afterTranscript = await options.database.processingRun.findUniqueOrThrow({ where: { id: run.id } })
+        if (afterTranscript.stage === 'HANDOFF_EVIDENCING') {
+          const evidencing = await handoffEvidencing(run)
+          if (evidencing === 'waiting') return { skipped: false, waiting: true }
+          if (evidencing === 'failed') return { skipped: false, failed: true, errorCode: 'transcript_incomplete' }
+        }
+      }
       const published = await publish(run, directory)
       return 'replanned' in published ? { skipped: false, waiting: true, replanned: true } : published
     } catch (error) {

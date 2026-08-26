@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import { Queue, Worker } from 'bullmq'
 import IORedis from 'ioredis'
 import { loadServerEnv } from '@online-learning/config'
@@ -10,9 +11,16 @@ import { cancelExternalTranscriptJobs, createTranscriptProcessor } from './proce
 import { cleanupExpiredUploads } from './processors/upload-cleanup'
 import { cleanupTranscriptObjects } from './processors/transcript-cleanup'
 import {
+  FakeProofDigestService,
+  FakeStrictAssessmentInputProvider,
+  InMemoryAlignmentAdapter,
+} from './handoff'
+import {
   enqueuePendingTranscriptCancellations, enqueueRecoverableRuns, enqueueRecoverableTranscriptRuns, ensureTranscriptRuns,
   publishPendingOutbox, type MediaQueueJob,
 } from './outbox'
+
+const hex64 = (seed: string) => createHash('sha256').update(seed).digest('hex')
 
 const env = loadServerEnv()
 const database = new PrismaClient({ datasources: { db: { url: env.DATABASE_URL } } })
@@ -36,7 +44,23 @@ const processPlayback = createPlaybackProcessor({
   transcriptEnabled: env.MOSS_ENABLED,
 })
 const moss = env.MOSS_ENABLED ? new HttpMossAdapter({ env }) : null
-const processTranscript = moss ? createTranscriptProcessor({ database, storage, workerId, env, moss }) : null
+const processTranscript = moss ? createTranscriptProcessor({
+  database,
+  storage,
+  workerId,
+  env,
+  moss,
+  // F2: v2 HANDOFF_EVIDENCING is routed to an injected in-memory alignment
+  // Fake + a fake proof digest; no real MFA/model/network is contacted here.
+  handoff: {
+    alignment: new InMemoryAlignmentAdapter(),
+    proof: new FakeProofDigestService(Buffer.from('echoflow-f2-fake-key'), 'f2-fake-v1'),
+    assessment: new FakeStrictAssessmentInputProvider(),
+    methodDigest: hex64('mfa-3.3.9'),
+    modelDigest: hex64('english_mfa-3.1.0'),
+    configDigest: hex64('default'),
+  },
+}) : null
 
 const worker = new Worker<MediaQueueJob>('echoflow-media', async (job) => {
   if (job.name === 'media.upload_verified') return processPlayback(job.data as PlaybackJob)

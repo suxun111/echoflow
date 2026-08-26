@@ -1,5 +1,5 @@
 import type { Queue } from 'bullmq'
-import { arbitrateTranscriptRun, type PrismaClient } from '@online-learning/database'
+import { arbitrateTranscriptRun, G3_PIPELINE_VERSION_V2, type PrismaClient } from '@online-learning/database'
 import type { PlaybackJob } from './processors/playback'
 import type { TranscriptJob } from './processors/transcript'
 import { G3_PIPELINE_VERSION } from './transcript/constants'
@@ -7,6 +7,8 @@ import { G3_PIPELINE_VERSION } from './transcript/constants'
 export type MediaQueueJob = PlaybackJob | TranscriptJob
 type QueueWriter = Pick<Queue<MediaQueueJob>, 'add'>
 type RevisionedChunk = { chunkIndex: number; planRevision: number }
+
+const G3_TRANSCRIPT_PIPELINES = [G3_PIPELINE_VERSION, G3_PIPELINE_VERSION_V2] as const
 
 function effectivePlanChunks<T extends RevisionedChunk>(chunks: readonly T[], revision: number): T[] {
   const selected = new Map<number, T>()
@@ -29,6 +31,7 @@ export async function publishPendingOutbox(database: PrismaClient, queue: QueueW
     ? [
         'media.upload_verified', 'media.playback_ready', 'moss.callback_received',
         'media.transcript_retry_requested', 'media.transcript_cancel_requested',
+        'media.transcript_process.v2',
       ]
     : ['media.upload_verified']
   const pending = await database.outboxEvent.findMany({
@@ -118,15 +121,16 @@ export async function enqueueRecoverableTranscriptRuns(database: PrismaClient, q
   const now = new Date()
   const recoverable = await database.processingRun.findMany({
     where: {
-      pipelineVersion: G3_PIPELINE_VERSION,
+      pipelineVersion: { in: [...G3_TRANSCRIPT_PIPELINES] },
       status: { in: ['QUEUED', 'PROCESSING', 'VALIDATING'] },
       OR: [{ leaseOwner: null }, { leaseExpiresAt: { lt: now } }],
     },
-    select: { id: true, mediaAssetId: true }, take: 100,
+    select: { id: true, mediaAssetId: true, pipelineVersion: true }, take: 100,
   })
   const bucket = Math.floor(Date.now() / 5_000)
   for (const run of recoverable) {
-    await queue.add('media.transcript_process', { mediaAssetId: run.mediaAssetId, processingRunId: run.id }, {
+    const jobName = run.pipelineVersion === G3_PIPELINE_VERSION_V2 ? 'media.transcript_process.v2' : 'media.transcript_process'
+    await queue.add(jobName, { mediaAssetId: run.mediaAssetId, processingRunId: run.id }, {
       jobId: `transcript-recover-${run.id}-${bucket}`, attempts: 1, removeOnComplete: 500, removeOnFail: 500,
     })
   }
