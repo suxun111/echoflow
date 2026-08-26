@@ -2,14 +2,18 @@ import { spawnSync } from 'node:child_process'
 import { resolve } from 'node:path'
 import { Client } from 'pg'
 
-async function main() {
+/**
+ * Create a fresh, disposable PostgreSQL test database and apply the full
+ * forward migration chain to it. The database name MUST match the
+ * ^echoflow_[A-Za-z0-9_]+_test$ pattern; anything else is refused.
+ * This function never touches business databases, volumes or containers.
+ */
+export async function prepareTestDatabase(requestedDatabaseName?: string): Promise<void> {
   const databaseUrl = process.env.TEST_DATABASE_URL
     ?? 'postgresql://online_learning:online_learning@localhost:5432/echoflow_g2_integration_test'
-  const requestedDatabaseName = process.argv[2]
   const selectedUrl = new URL(databaseUrl)
   if (requestedDatabaseName) selectedUrl.pathname = `/${requestedDatabaseName}`
-  const parsed = selectedUrl
-  const databaseName = parsed.pathname.slice(1)
+  const databaseName = selectedUrl.pathname.slice(1)
 
   if (!/^echoflow_[A-Za-z0-9_]+_test$/.test(databaseName)) {
     throw new Error(`Refusing to prepare non-test database: ${databaseName}`)
@@ -45,4 +49,6 @@ async function main() {
   console.log(`Prepared isolated PostgreSQL test database: ${databaseName}`)
 }
 
-void main()
+if (require.main === module) {
+  void prepareTestDatabase(process.argv[2])
+}

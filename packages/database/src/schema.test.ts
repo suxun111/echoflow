@@ -94,4 +94,55 @@ describe('V1 Prisma baseline', () => {
     expect(g3PlanRevisionMigration).toContain('OLD."processingRunId" IS DISTINCT FROM NEW."processingRunId"')
     expect(g3PlanRevisionMigration).toContain('OLD."resultObjectKey" IS NOT NULL')
   })
+
+  describe('G3 v2 deterministic foundation migration', () => {
+    const v2Migration = readFileSync(resolve(__dirname, '../prisma/migrations/20260826000100_g3_v2_deterministic_foundation/migration.sql'), 'utf8')
+
+    it('adds v2 entities and enum values without touching historical migrations', () => {
+      for (const model of ['ProcessingHandoff', 'HandoffAssessment', 'AlignmentJob', 'HandoffEvidence']) {
+        expect(schema).toContain(`model ${model} `)
+        expect(v2Migration).toContain(`CREATE TABLE "${model}"`)
+      }
+      expect(v2Migration).toContain("ALTER TYPE \"MediaObjectKind\" ADD VALUE IF NOT EXISTS 'HANDOFF_AUDIO'")
+      expect(v2Migration).toContain("ALTER TYPE \"MediaObjectKind\" ADD VALUE IF NOT EXISTS 'ALIGNMENT_RAW'")
+      expect(v2Migration).toContain("ALTER TYPE \"ProcessingStage\" ADD VALUE IF NOT EXISTS 'HANDOFF_EVIDENCING'")
+    })
+
+    it('persists the seven H_* counts on TranscriptVersion with DB-level equalities and hProviderWord=0', () => {
+      for (const field of ['hTotal', 'hUnique', 'hR1', 'hUnresolved', 'hSegment', 'hProviderWord', 'hAlignment']) {
+        expect(schema).toMatch(new RegExp(`${field}\\s+Int\\s+@default\\(0\\)`))
+      }
+      expect(v2Migration).toContain('ADD COLUMN "hTotal" INTEGER NOT NULL DEFAULT 0')
+      expect(v2Migration).toContain('TranscriptVersion_h_counts_check')
+      expect(v2Migration).toContain('"hUnique" + "hR1" + "hUnresolved" = "hTotal"')
+      expect(v2Migration).toContain('"hSegment" + "hProviderWord" + "hAlignment" = "hUnique" + "hR1"')
+      expect(v2Migration).toContain('"hProviderWord" = 0')
+    })
+
+    it('freezes handoff identity, adjacency, revision and validity at the database level', () => {
+      expect(v2Migration).toContain('ProcessingHandoff_processingRunId_planRevision_logicalHandoffIndex_key')
+      expect(v2Migration).toContain('ProcessingChunk_id_processingRunId_key')
+      expect(v2Migration).toContain('"previousChunkId" <> "nextChunkId"')
+      expect(v2Migration).toContain('validate_processing_handoff_chunks')
+      expect(v2Migration).toContain("IF prev_chunk.\"chunkIndex\" + 1 <> next_chunk.\"chunkIndex\"")
+      expect(v2Migration).toContain('prevent_processing_handoff_identity_mutation')
+    })
+
+    it('keeps assessments non-terminal and final evidence terminal and immutable', () => {
+      expect(v2Migration).toContain('HandoffAssessment_handoffId_key')
+      expect(v2Migration).toContain('prevent_handoff_assessment_mutation')
+      expect(v2Migration).toContain('HandoffEvidence_handoffId_key')
+      expect(v2Migration).toContain('prevent_handoff_evidence_mutation')
+      expect(v2Migration).toContain('HandoffEvidence is final and immutable')
+    })
+
+    it('freezes the accepted evidenceType whitelist and alignment job boundaries', () => {
+      expect(v2Migration).toContain('"evidenceType" IN (\'strict_segment\', \'boundary_forced_alignment\')')
+      expect(v2Migration).toContain('alignment_unavailable')
+      expect(v2Migration).toContain('AlignmentJob_identity_check')
+      expect(v2Migration).toContain('"attempt" BETWEEN 0 AND 3')
+      expect(v2Migration).toContain('prevent_alignment_job_identity_mutation')
+      expect(v2Migration).toContain('externalJobId is set-once')
+    })
+  })
 })

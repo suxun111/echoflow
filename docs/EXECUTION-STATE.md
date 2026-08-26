@@ -128,6 +128,15 @@
 - 用户已确认 F1 范围：仅实施 v2 schema、纯领域校验、AlignmentAdapter Fake、独立可弃测试库与确定性测试；不接真实 MFA/MOSS、媒体、对象存储、网络、API 或 Worker；未来留存、回调、资源、密钥和 enrollment 另行确认；第 5 节除 F1 外的建议仅为待决记录。
 - 合同状态已改为“已确认”。按合同第 7 节，下一步为创建独立实施分支并逐项完成 F1 的 schema、纯领域、Fake 与测试；每次审核后绑定 Commit。F1 完成后，下一份合同才讨论 TranscriptRunArbiter、显式 enrollment、v2 Worker/Outbox/API 路由和受控对象生命周期。
 
+## 2026-08-26 G3 v2 确定性基础层 F1 完成（实施收尾）
+
+- 实施分支 `codex/g3-v2-foundation-20260826`（自 `db4f776`）。F1 边界严格执行：仅前向 migration/schema、纯领域 validator、AlignmentAdapter Port+内存 Fake、独立可弃 PostgreSQL 测试库与确定性测试；未接真实 MFA/MOSS、媒体、对象存储、网络、API/Outbox/Worker processor、生产密钥或 enrollment。
+- 数据库新增前向迁移 `20260826000100_g3_v2_deterministic_foundation`：枚举 ADD VALUE（`HANDOFF_AUDIO`/`ALIGNMENT_RAW`/`HANDOFF_EVIDENCING`）、`TranscriptVersion` 7 个 `H_*` 列与 `TranscriptVersion_h_counts_check`（非负 + 两组等式 + `hProviderWord=0`）、四张新表（`ProcessingHandoff`/`HandoffAssessment`/`AlignmentJob`/`HandoffEvidence`）与白名单 CHECK、5 个 trigger（handoff 身份不可变、左右 Chunk 同 run/revision/相邻/SUCCEEDED/不可自连、assessment 不可变、final evidence append-only 终态不可覆盖、AlignmentJob 身份不可变 + externalJobId set-once）。
+- 纯领域模块 `apps/worker/src/handoff/`：白名单与 H_* 类型、handoff/strict-segment/evidence 校验、H_* 重算与发布前断言、proof-digest 注入接口（仅 Fake key）、AlignmentAdapter Port 与确定性内存 Fake；fixture 全部为 synthetic 非内容元数据。
+- 验证：worker 132 通过 + 3 跳过（`RUN_G2_LONG_MEDIA` 门控），其中新增 handoff 56 个纯函数/Fake 测试；database 33 通过（17 文本断言 + 16 真实 PostgreSQL 集成测试，库 `echoflow_g2_v2_foundation_test`）；根级 lint/test/build 全通过。
+- 独立 Reviewer 结论：无 P0；1 个 P1（final evidence 终态可被 DELETE 绕过）已修复为 append-only（新增 `BEFORE DELETE` trigger + 集成测试）；其余 P2（PG≥13 注释、幂等键排序序列化、pretest 依赖、冗余索引）已按需处理或记录。
+- 该证据只证明 F1 合同实现正确，不证明 MFA 对真实播客准确、真实 handoff 已解决、B2/B3/G3-C 通过或 G3 关闭。
+
 ## 已完成证据
 
 ### G0 第一轮

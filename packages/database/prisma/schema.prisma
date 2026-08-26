@@ -51,6 +51,8 @@ enum MediaObjectKind {
   NORMALIZED_AUDIO
   AUDIO_CHUNK
   ASR_RAW
+  HANDOFF_AUDIO
+  ALIGNMENT_RAW
 }
 
 enum ProcessingStatus {
@@ -69,6 +71,7 @@ enum ProcessingStage {
   AUDIO_EXTRACTING
   CHUNKING
   TRANSCRIBING
+  HANDOFF_EVIDENCING
   MERGING
   CUE_SEGMENTING
   VALIDATING
@@ -264,6 +267,7 @@ model ProcessingRun {
   owner           User              @relation(fields: [ownerId], references: [id], onDelete: Cascade)
   mediaAsset      MediaAsset        @relation(fields: [mediaAssetId, ownerId], references: [id, ownerId], onDelete: Cascade)
   chunks          ProcessingChunk[]
+  handoffs        ProcessingHandoff[]
   transcriptVersions TranscriptVersion[]
 
   @@unique([mediaAssetId, pipelineVersion])
@@ -306,8 +310,11 @@ model ProcessingChunk {
   updatedAt       DateTime         @updatedAt
   processingRun   ProcessingRun    @relation(fields: [processingRunId], references: [id], onDelete: Cascade)
   callbackReceipts MossCallbackReceipt[]
+  handoffsAsPrevious ProcessingHandoff[] @relation("HandoffPreviousChunk")
+  handoffsAsNext     ProcessingHandoff[] @relation("HandoffNextChunk")
 
   @@unique([processingRunId, planRevision, chunkIndex])
+  @@unique([id, processingRunId])
   @@index([processingRunId, chunkIndex, planRevision])
   @@index([status, updatedAt])
   @@index([status, nextPollAt])
@@ -355,6 +362,13 @@ model TranscriptVersion {
   processingRunId String         @unique @db.Uuid
   version       Int
   planRevision  Int              @default(0)
+  hTotal        Int              @default(0)
+  hUnique       Int              @default(0)
+  hR1           Int              @default(0)
+  hUnresolved   Int              @default(0)
+  hSegment      Int              @default(0)
+  hProviderWord Int              @default(0)
+  hAlignment    Int              @default(0)
   language      String           @default("en") @db.VarChar(16)
   pipelineVersion String         @db.VarChar(128)
   modelVersion String            @db.VarChar(128)
@@ -477,4 +491,127 @@ model IdempotencyRecord {
 
   @@unique([ownerId, scope, key])
   @@index([expiresAt])
+}
+
+// ---- G3 v2 deterministic foundation (Route B handoff evidence) ----
+
+model ProcessingHandoff {
+  id                  String    @id @default(uuid()) @db.Uuid
+  processingRunId     String    @db.Uuid
+  planRevision        Int       @default(0)
+  logicalHandoffIndex Int
+  previousChunkId     String    @db.Uuid
+  nextChunkId         String    @db.Uuid
+  status              String    @default("PENDING") @db.VarChar(32)
+  attempt             Int       @default(0)
+  errorCode           String?   @db.VarChar(128)
+  leaseOwner          String?   @db.VarChar(255)
+  leaseExpiresAt      DateTime?
+  cancelledAt         DateTime?
+  submittedAt         DateTime?
+  completedAt         DateTime?
+  failedAt            DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  processingRun       ProcessingRun    @relation(fields: [processingRunId], references: [id], onDelete: Cascade)
+  previousChunk       ProcessingChunk  @relation("HandoffPreviousChunk", fields: [previousChunkId, processingRunId], references: [id, processingRunId], onDelete: Restrict)
+  nextChunk           ProcessingChunk  @relation("HandoffNextChunk", fields: [nextChunkId, processingRunId], references: [id, processingRunId], onDelete: Restrict)
+  assessment          HandoffAssessment?
+  alignmentJob        AlignmentJob?
+  finalEvidence       HandoffEvidence?
+
+  @@unique([processingRunId, planRevision, logicalHandoffIndex])
+  @@unique([id, processingRunId])
+  @@index([processingRunId, status])
+  @@index([status, leaseExpiresAt])
+}
+
+model HandoffAssessment {
+  id            String   @id @default(uuid()) @db.Uuid
+  handoffId     String   @unique @db.Uuid
+  decision      String   @db.VarChar(32)
+  decisionCode  String   @db.VarChar(128)
+  evidenceType  String   @db.VarChar(64)
+  inputChecksum String   @db.Char(64)
+  windowStartMs Int
+  windowEndMs   Int
+  metadata      Json?
+  createdAt     DateTime @default(now())
+  handoff       ProcessingHandoff @relation(fields: [handoffId], references: [id], onDelete: Cascade)
+
+  @@index([handoffId, decision])
+}
+
+model AlignmentJob {
+  id                  String   @id @default(uuid()) @db.Uuid
+  handoffId           String   @unique @db.Uuid
+  idempotencyKey      String   @unique @db.VarChar(512)
+  correlationHandle   String   @unique @db.VarChar(255)
+  status              String   @default("PENDING") @db.VarChar(32)
+  attempt             Int      @default(0)
+  externalJobId       String?  @unique @db.VarChar(512)
+  windowStartMs       Int
+  windowEndMs         Int
+  methodDigest        String   @db.Char(64)
+  modelDigest         String   @db.Char(64)
+  configDigest        String   @db.Char(64)
+  errorCode           String?  @db.VarChar(128)
+  leaseOwner          String?  @db.VarChar(255)
+  leaseExpiresAt      DateTime?
+  nextPollAt          DateTime?
+  nextAttemptAt       DateTime?
+  submittedAt         DateTime?
+  externalUpdatedAt   DateTime?
+  externalCancelledAt DateTime?
+  completedAt         DateTime?
+  failedAt            DateTime?
+  cancelledAt         DateTime?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  handoff             ProcessingHandoff @relation(fields: [handoffId], references: [id], onDelete: Cascade)
+
+  @@index([status, nextPollAt])
+  @@index([status, nextAttemptAt])
+}
+
+model HandoffEvidence {
+  id                        String   @id @default(uuid()) @db.Uuid
+  handoffId                 String   @unique @db.Uuid
+  planRevision              Int
+  logicalHandoffIndex       Int
+  decision                  String   @db.VarChar(32)
+  decisionCode              String   @db.VarChar(128)
+  evidenceType              String   @db.VarChar(64)
+  schemaVersion             String   @db.VarChar(64)
+  pipelineVersion           String   @db.VarChar(128)
+  previousChunkId           String   @db.Uuid
+  nextChunkId               String   @db.Uuid
+  normalizedAudioVersionId  String?  @db.VarChar(512)
+  normalizedAudioChecksum   String?  @db.Char(64)
+  previousAsrObjectKey      String   @db.VarChar(1024)
+  previousAsrVersionId      String?  @db.VarChar(512)
+  previousAsrChecksum       String?  @db.Char(64)
+  nextAsrObjectKey          String   @db.VarChar(1024)
+  nextAsrVersionId          String?  @db.VarChar(512)
+  nextAsrChecksum           String?  @db.Char(64)
+  rawObjectKey              String?  @db.VarChar(1024)
+  rawVersionId              String?  @db.VarChar(512)
+  rawChecksum               String?  @db.Char(64)
+  methodProvider            String   @db.VarChar(128)
+  methodVersion             String   @db.VarChar(128)
+  modelRevision             String?  @db.VarChar(128)
+  alignmentPolicyDigest     String?  @db.Char(64)
+  windowStartMs             Int
+  windowEndMs               Int
+  candidateCount            Int      @default(0)
+  anchorCount               Int      @default(0)
+  coverageMs                Int      @default(0)
+  proofKeyVersion           String   @db.VarChar(64)
+  proofDigest               String   @db.Char(64)
+  verifiedAt                DateTime?
+  createdAt                 DateTime @default(now())
+  handoff                   ProcessingHandoff @relation(fields: [handoffId], references: [id], onDelete: Cascade)
+
+  @@unique([id, handoffId])
+  @@index([handoffId, planRevision])
 }
