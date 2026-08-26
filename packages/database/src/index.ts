@@ -16,6 +16,8 @@ export {
 } from '@prisma/client'
 export type { User } from '@prisma/client'
 
+export * from './transcript-arbiter'
+
 export const databasePackage = {
   provider: 'postgresql',
   schemaPath: 'packages/database/prisma/schema.prisma',

@@ -1,6 +1,5 @@
-import { randomUUID } from 'node:crypto'
 import type { Queue } from 'bullmq'
-import type { PrismaClient } from '@online-learning/database'
+import { arbitrateTranscriptRun, type PrismaClient } from '@online-learning/database'
 import type { PlaybackJob } from './processors/playback'
 import type { TranscriptJob } from './processors/transcript'
 import { G3_PIPELINE_VERSION } from './transcript/constants'
@@ -99,29 +98,20 @@ export async function ensureTranscriptRuns(database: PrismaClient) {
     },
     select: { id: true, ownerId: true }, take: 100,
   })
+  let created = 0
   for (const asset of assets) {
-    const runId = randomUUID()
     await database.$transaction(async (transaction) => {
-      const run = await transaction.processingRun.upsert({
-        where: { mediaAssetId_pipelineVersion: { mediaAssetId: asset.id, pipelineVersion: G3_PIPELINE_VERSION } },
-        create: {
-          id: runId, ownerId: asset.ownerId, mediaAssetId: asset.id,
-          pipelineVersion: G3_PIPELINE_VERSION, stage: 'PLAYBACK_READY',
-        },
-        update: {},
+      const outcome = await arbitrateTranscriptRun(transaction, {
+        mediaAssetId: asset.id,
+        pipelineVersion: G3_PIPELINE_VERSION,
+        startStage: 'PLAYBACK_READY',
+        eventType: 'media.playback_ready',
+        idempotencyKey: `media:${asset.id}:playback_ready:${G3_PIPELINE_VERSION}`,
       })
-      await transaction.outboxEvent.upsert({
-        where: { idempotencyKey: `media:${asset.id}:playback_ready:${G3_PIPELINE_VERSION}` },
-        create: {
-          aggregateType: 'MediaAsset', aggregateId: asset.id, eventType: 'media.playback_ready',
-          idempotencyKey: `media:${asset.id}:playback_ready:${G3_PIPELINE_VERSION}`,
-          payload: { mediaAssetId: asset.id, processingRunId: run.id },
-        },
-        update: {},
-      })
+      if (outcome.kind === 'created') created += 1
     })
   }
-  return { created: assets.length }
+  return { created }
 }
 
 export async function enqueueRecoverableTranscriptRuns(database: PrismaClient, queue: QueueWriter) {
