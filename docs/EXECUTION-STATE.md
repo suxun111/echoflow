@@ -1,6 +1,6 @@
 # EchoFlow Execution State
 
-更新时间：2026-08-26
+更新时间：2026-08-28
 
 此文件记录动态执行状态，不重复存放完整 PRD。长期产品决定见 [EchoFlow V1 PRD](EchoFlow-V1-PRD.md)，整体终点见 [v0.5.0-alpha.1 Goal](GOAL-v0.5.0-alpha.1.md)。
 
@@ -9,7 +9,7 @@
 | 字段 | 当前值 |
 |---|---|
 | Goal | `v0.5.0-alpha.1` |
-| Gate | `G1`、`G2` 已关闭；`G3` 保持打开。G3-A 已有真实 30 秒 MOSS 冒烟和一次真实约 5 分钟 EchoFlow → MOSS → ACTIVE 字幕发布；G3-B 的 C1 已在新授权私人长媒体上完成并正确失败关闭：8 个有效 Chunk 在最多一次 revision 1 后仍无唯一 segment-first 交接证据，未发布 ACTIVE。BE1 与 `g3-transcript-v2` 实施合同的独立复核均已通过；MFA S0 已在 D 盘 CPU 环境完成模型/词典 inspect、40.459 秒非私人本机对齐、脱敏结构校验及清理后只读复核，现已关闭。尚未开始 v2 产品实现；G3-C 的 30/60 分钟完整发布、故障恢复与容量矩阵尚未开始。 |
+| Gate | `G1`、`G2` 已关闭；`G3` 保持打开。G3-A 已有真实 30 秒 MOSS 冒烟和一次真实约 5 分钟 EchoFlow → MOSS → ACTIVE 字幕发布；G3-B 的 C1 已在新授权私人长媒体上完成并正确失败关闭：8 个有效 Chunk 在最多一次 revision 1 后仍无唯一 segment-first 交接证据，未发布 ACTIVE。BE1 与 `g3-transcript-v2` 实施合同的独立复核均已通过；MFA S0 已在 D 盘 CPU 环境完成模型/词典 inspect、40.459 秒非私人本机对齐、脱敏结构校验及清理后只读复核，现已关闭。用户已确认 F2 的“方向一”：strict evidence 是唯一进 `MERGING` 的成功路径；无 raw identity 的 Fake alignment 必须失败关闭。F2 已完成受限 Fake 运行态并通过最终复核；不接入真实对象/对齐器。G3-C 的 30/60 分钟完整发布、故障恢复与容量矩阵尚未开始。 |
 | 唯一 trunk | `master` |
 | V1 产品代码审计源点 | `42968ad` |
 | G0 文档基线 | `d01c67e`，已 fast-forward 至 master |
@@ -18,10 +18,10 @@
 | G2 实施分支 | `codex/g2-long-video-upload-playback-20260812`；最终代码验收锚点 `d08f6c6` |
 | G3 实施分支 | `codex/g3-moss-transcript-20260813`；基线提交 `0c3e2ee`（分支创建时的 `master`）；真实 5 分钟发布代码锚点 `8873c35` |
 | MOSS Provider 分支 | `codex/echoflow-provider-gateway-20260815`；当前输入范围校验锚点 `2f1c2ad`（Gateway 基线 `cdf6eb3`） |
-| WIP | G3“MOSS 与完整字幕原子发布”仍是唯一核心纵向闭环。C1 证明当前固定 MOSS Provider 的 `segment` 粒度无法在该样本的全部边界提供唯一交接证据；Provider 当前没有经验证的原生 `words[]`，而 EchoFlow 现有字级合并路径也不是严格的 handoff proof 验证器。[G3-BE1 跨分片交接证据增强任务合同](G3-BE1-HANDOFF-EVIDENCE-TASK-CONTRACT.md)及其[独立复核](G3-BE1-INDEPENDENT-REVIEW.md)，连同已复核的 [G3 v2 实施合同](G3-TRANSCRIPT-V2-IMPLEMENTATION-CONTRACT.md)，已冻结 Route B、失败关闭规则、实施切面与确定性验证边界。[MFA S0](G3-V2-MFA-IMPLEMENTATION-START-CONTRACT.md)已关闭，完整证据见 [脱敏运行证据](G3-V2-MFA-S0-VERIFICATION-EVIDENCE.md)；下一步仅能先创建/确认新的确定性 v2 代码实施任务合同，尚未开始迁移、代码或私人媒体处理。 |
+| WIP | G3“MOSS 与完整字幕原子发布”仍是唯一核心纵向闭环。C1 证明当前固定 MOSS Provider 的 `segment` 粒度无法在该样本的全部边界提供唯一交接证据；Provider 当前没有经验证的原生 `words[]`，而 EchoFlow 现有字级合并路径也不是严格的 handoff proof 验证器。[G3-BE1 跨分片交接证据增强任务合同](G3-BE1-HANDOFF-EVIDENCE-TASK-CONTRACT.md)及其[独立复核](G3-BE1-INDEPENDENT-REVIEW.md)，连同已复核的 [G3 v2 实施合同](G3-TRANSCRIPT-V2-IMPLEMENTATION-CONTRACT.md)，已冻结 Route B、失败关闭规则、实施切面与确定性验证边界。[MFA S0](G3-V2-MFA-IMPLEMENTATION-START-CONTRACT.md)已关闭，完整证据见 [脱敏运行证据](G3-V2-MFA-S0-VERIFICATION-EVIDENCE.md)。F2 的 Arbiter、enrollment、API/Outbox/Worker Fake 路由已完成；方向一已落实，运行态不伪造 raw identity，最终独立复核为 P0=0/P1=0。真实对象/对齐器合同继续冻结。 |
 | 产品功能开发 | G2 已通过退出门；G3 实施中，G4–G5 继续冻结 |
 | Remote | `origin = https://github.com/suxun111/echoflow.git`；Private；外部恢复验证通过 |
-| 下一人工边界 | F1 已实施并推送（`06a9be7`）。[v2 运行态实施启动合同](G3-V2-RUNTIME-IMPLEMENTATION-START-CONTRACT.md)已确认。用户确认 F2 范围：仅实现 TranscriptRunArbiter、显式 enrollment、v2 Worker/Outbox/API 路由、Fake 和确定性测试；不接入真实 MFA/MOSS、私人媒体、对象存储实际读写、外部网络、生产密钥或公网 callback。对齐器（建议本地 MFA 3.3.9）、网络/回调（建议纯轮询）、数据生命周期（HANDOFF_AUDIO≈24h / ALIGNMENT_RAW≤7d）、资源与并发、proof key 生产来源与 enrollment 隐私告知仍待后续合同单独确认。F2 只允许运行态接线到 Fake 与测试，不得接入真实对齐器、真实对象读写或生产密钥。 |
+| 下一人工边界 | F1 已实施并推送（`06a9be7`）。[v2 运行态实施启动合同](G3-V2-RUNTIME-IMPLEMENTATION-START-CONTRACT.md)的 F2 已以本地代码锚点 `6ba3c41` 完成，且用户已选择方向一。F2 唯一成功路径为 strict evidence → `MERGING`；Fake alignment 无 raw identity 必须失败关闭。下一步必须另立真实对象/对齐器与隐私生命周期合同；真实对象、真实对齐器、生产密钥与 G3-C 仍未授权。任何 push/merge/删分支仍需用户明确授权。 |
 
 > S0 已于 2026-08-26 完成清理与冻结条件下的只读复核：目录枚举、两次 UTF-8 `mfa model inspect`、本地 catalog/哈希、CPU 约束、侧车证据和受限 C 盘路径均与已冻结证据一致。
 
@@ -146,6 +146,12 @@
 
 - 用户已确认 F2 范围：仅实现 TranscriptRunArbiter、显式 enrollment、v2 Worker/Outbox/API 路由、Fake 和确定性测试；不接入真实 MFA/MOSS、私人媒体、对象存储实际读写、外部网络、生产密钥或公网 callback；数据留存、回调、资源、密钥和隐私告知方案后续另行确认；第 3 节除 F2 范围外的建议仅为待决记录。
 - 合同状态已改为“已确认”。实施顺序固定为：1) Arbiter（v1/v2 互斥、幂等、租约 fencing）→ 2) Enrollment（owner/allowlist/Idempotency-Key/重复与冲突）→ 3) Worker/Outbox 路由到 Fake（恢复/取消/迟到/失败关闭）→ 4) API 脱敏状态 → 5) 对象生命周期策略+Fake 测试 → 6) 全仓 lint/test/build + 独立审查 + 提交。
+
+## 2026-08-28 G3 v2 F2 运行态实施（方向一验收通过）
+
+- 用户已确认方向一：`strict_segment` 是 F2 唯一可进入 `MERGING` 的成功 evidence；Fake alignment 的 accepted provider result 缺少另行授权的 `ALIGNMENT_RAW` identity 时，必须以 `alignment_raw_unavailable` / `transcript_incomplete` 失败关闭，且零 evidence/`MERGING`/字幕发布。
+- F2 的已授权实现（Arbiter、显式 enrollment、test-only API/Outbox/Worker Fake 路由、恢复/取消、脱敏状态与生命周期策略）已完成，并以本地代码锚点 `6ba3c41` 提交；根级 lint、test（313 通过、3 跳过）和 build 均通过。测试只使用隔离 PostgreSQL/Redis/MinIO 与合成媒体；未启动 MOSS/API/Worker 业务进程，未读取或上传私人媒体。
+- 两位独立 Reviewer 在旧 real-media transcript processor 的 v2 injection/sentinel 路径退役、F1 纯领域 marker 例外收窄及本状态同步后，均给出 P0=0/P1=0。残留 retired helper 为不可达 P2 清理项，不能进入运行态。F2 只证明受限 Fake 路由的合同实现，不授权真实对象、对齐器或 G3-C；代码仅本地提交，未推送。
 
 ## 已完成证据
 
