@@ -2,7 +2,7 @@
 
 创建日期：2026-08-26
 确认日期：2026-08-26
-状态：**已确认并进入收尾验证。用户确认 F2 范围：仅实现 TranscriptRunArbiter、显式 enrollment、v2 Worker/Outbox/API 路由、Fake 和确定性测试；不接入真实 MFA/MOSS、私人媒体、对象存储实际读写、外部网络、生产密钥或公网 callback。2026-08-28 用户进一步确认“方向一”：F2 的成功验收只覆盖 strict evidence → `MERGING`；Fake 对齐只覆盖受控生命周期和无 raw 身份时的失败关闭。F2 不伪造 raw object identity，不物化 `boundary_forced_alignment` final evidence，不发布字幕。第 3 节的高风险选择仍全部待决。**
+状态：**已确认并完成。F2 代码锚点为 `6ba3c41`，验证证据提交为 `1726ad7`。用户确认 F2 范围：仅实现 TranscriptRunArbiter、显式 enrollment、v2 Worker/Outbox/API 路由、Fake 和确定性测试；不接入真实 MFA/MOSS、私人媒体、对象存储实际读写、外部网络、生产密钥或公网 callback。2026-08-28 用户进一步确认“方向一”：F2 的成功验收只覆盖 strict evidence → `MERGING`；Fake 对齐只覆盖受控生命周期和无 raw 身份时的失败关闭。F2 不伪造 raw object identity，不物化 `boundary_forced_alignment` final evidence，不发布字幕。第 3 节的高风险选择仍全部待决。**
 
 本确认只冻结 F2 的运行态实现边界（仅 Fake/测试基础设施），不授权真实对齐器、私人媒体、对象存储实际读写、生产密钥或公网 callback。F1 纯领域测试的 marker 例外不授权 F2 runtime 读取、产生或持久化任何对象身份。
 
