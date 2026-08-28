@@ -23,6 +23,11 @@ type ResponseContext = {
 type Next = (error?: unknown) => void
 
 const RequestIdPattern = /^[A-Za-z0-9._:-]{8,128}$/
+const UuidInPathPattern = /\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/gi
+
+function redactPathIdentifiers(path: string) {
+  return path.replace(UuidInPathPattern, ':id')
+}
 
 export type RequestLog = {
   type: 'http_request'
@@ -43,7 +48,7 @@ export function installRequestContext(app: INestApplication, writeLog: (entry: R
     response.setHeader('x-request-id', requestId)
 
     response.on('finish', () => {
-      const path = request.path ?? request.originalUrl?.split('?')[0] ?? 'unknown'
+      const path = redactPathIdentifiers(request.path ?? request.originalUrl?.split('?')[0] ?? 'unknown')
       writeLog({
         type: 'http_request', requestId, method: request.method, path,
         status: response.statusCode, durationMs: Math.round(performance.now() - startedAt),

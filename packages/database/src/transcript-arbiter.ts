@@ -19,6 +19,7 @@ export type G3TranscriptPipeline = (typeof G3_TRANSCRIPT_PIPELINES)[number]
 
 export const G3_PIPELINE_VERSION_V2 = 'g3-transcript-v2' as const
 export const G3_PIPELINE_VERSION_V1 = 'g3-transcript-v1' as const
+export const MAX_V2_ENROLL_DURATION_MS = 60 * 60 * 1_000
 
 export const ARBITER_CONFLICT_REASONS = ['other_pipeline_holds_media'] as const
 export const ARBITER_NOT_ELIGIBLE_REASONS = [
@@ -28,6 +29,9 @@ export const ARBITER_NOT_ELIGIBLE_REASONS = [
   'owner_mismatch',
   'duration_exceeds_limit',
   'active_transcript_exists',
+  'prior_pipeline_not_failed_or_cancelled',
+  'v2_run_already_terminal',
+  'explicit_enrollment_required',
 ] as const
 
 export type ArbiterOutcome =
@@ -52,8 +56,10 @@ export interface ArbitrateRequest {
   requireNoActiveTranscript?: boolean
   /** v2: maximum asset duration in ms (0 means no limit). */
   maxDurationMs?: number
-  /** Stable idempotency scope/identity for explicit enrollment (v2). */
-  requestKey?: string
+  /** Marks an API v2 enrollment; the idempotency key remains opaque. */
+  explicitEnrollment?: boolean
+  /** Opaque test-only queue handle; never a media/run database identifier. */
+  queueCorrelationHandle?: string
 }
 
 interface ArbitratedState {
@@ -107,6 +113,21 @@ export async function arbitrateTranscriptRun(
   if (!state.asset) return { kind: 'not_eligible', reason: 'asset_not_found' }
   if (state.asset.deletedAt !== null) return { kind: 'not_eligible', reason: 'deleted' }
   if (state.asset.status !== 'PLAYABLE') return { kind: 'not_eligible', reason: 'not_playable' }
+  // Keep the v2 gate in the arbiter as well as the HTTP controller.  This
+  // prevents a future internal caller from creating a v2 run that bypasses
+  // owner consent, the duration bound, or the isolated Fake-only route.
+  if (request.pipelineVersion === G3_PIPELINE_VERSION_V2 && (
+    request.explicitEnrollment !== true
+    || !request.ownerId
+    || request.requireNoActiveTranscript !== true
+    || request.maxDurationMs !== MAX_V2_ENROLL_DURATION_MS
+    || request.startStage !== 'HANDOFF_EVIDENCING'
+    || request.eventType !== 'media.transcript_process.v2'
+    || !request.queueCorrelationHandle
+    || !/^[A-Za-z0-9._:-]{8,128}$/.test(request.queueCorrelationHandle)
+  )) {
+    return { kind: 'not_eligible', reason: 'explicit_enrollment_required' }
+  }
   if (request.ownerId !== undefined && state.asset.ownerId !== request.ownerId) {
     return { kind: 'not_eligible', reason: 'owner_mismatch' }
   }
@@ -118,7 +139,22 @@ export async function arbitrateTranscriptRun(
   }
 
   const ownRun = state.g3Runs.find((run) => run.pipelineVersion === request.pipelineVersion)
-  if (ownRun) return { kind: 'idempotent', processingRunId: ownRun.id }
+  if (ownRun) {
+    if (request.explicitEnrollment && request.pipelineVersion === G3_PIPELINE_VERSION_V2) {
+      // The public Idempotency-Key is hashed by the API before it reaches this
+      // function.  Only the exact request's opaque Outbox identity may replay;
+      // another request must not become an accidental v2 retry.
+      const matchingRequest = await tx.outboxEvent.findUnique({ where: { idempotencyKey: request.idempotencyKey } })
+      if (matchingRequest?.aggregateType === 'ProcessingRun' && matchingRequest.aggregateId === ownRun.id) {
+        return { kind: 'idempotent', processingRunId: ownRun.id }
+      }
+      if ((ACTIVE_RUN_STATUSES as readonly string[]).includes(ownRun.status)) {
+        return { kind: 'conflict', reason: 'other_pipeline_holds_media' }
+      }
+      return { kind: 'not_eligible', reason: 'v2_run_already_terminal' }
+    }
+    return { kind: 'idempotent', processingRunId: ownRun.id }
+  }
 
   // Mutual exclusion: a different G3 transcript pipeline must not be allowed
   // to enroll while another holds the media (active run or active transcript).
@@ -142,6 +178,17 @@ export async function arbitrateTranscriptRun(
     return { kind: 'conflict', reason: 'other_pipeline_holds_media' }
   }
 
+  // F2 intentionally permits an explicit v2 enrollment only as a replacement
+  // for a failed or cancelled v1 attempt.  A v1 run which says it succeeded
+  // but has no ACTIVE transcript is still not a valid upgrade path; treating
+  // it as one would silently bypass the separately-frozen supersede policy.
+  if (request.pipelineVersion === G3_PIPELINE_VERSION_V2) {
+    const priorV1 = state.g3Runs.find((run) => run.pipelineVersion === G3_PIPELINE_VERSION_V1)
+    if (priorV1 && !['FAILED', 'CANCELLED'].includes(priorV1.status)) {
+      return { kind: 'not_eligible', reason: 'prior_pipeline_not_failed_or_cancelled' }
+    }
+  }
+
   const processingRunId = randomUUID()
   await tx.processingRun.create({
     data: {
@@ -151,16 +198,19 @@ export async function arbitrateTranscriptRun(
       pipelineVersion: request.pipelineVersion,
       stage: request.startStage,
       status: 'QUEUED',
+      ...(request.pipelineVersion === G3_PIPELINE_VERSION_V2 ? { requestId: request.queueCorrelationHandle } : {}),
     },
   })
   await tx.outboxEvent.upsert({
     where: { idempotencyKey: request.idempotencyKey },
     create: {
-      aggregateType: 'MediaAsset',
-      aggregateId: request.mediaAssetId,
+      aggregateType: request.pipelineVersion === G3_PIPELINE_VERSION_V2 ? 'ProcessingRun' : 'MediaAsset',
+      aggregateId: request.pipelineVersion === G3_PIPELINE_VERSION_V2 ? processingRunId : request.mediaAssetId,
       eventType: request.eventType,
       idempotencyKey: request.idempotencyKey,
-      payload: { mediaAssetId: request.mediaAssetId, processingRunId, requestKey: request.requestKey ?? null },
+      payload: request.pipelineVersion === G3_PIPELINE_VERSION_V2
+        ? { v2JobHandle: request.queueCorrelationHandle! }
+        : { mediaAssetId: request.mediaAssetId, processingRunId },
     },
     update: {},
   })

@@ -51,6 +51,10 @@ export const ServerEnvSchema = z.object({
   V2_TRANSCRIPT_ALLOWLIST: z.string().default('')
     .transform((value) => value.split(',').map((id) => id.trim()).filter(Boolean))
     .pipe(z.array(z.string().min(1))),
+  // F2 may exercise v2 only in an isolated test harness.  This flag cannot
+  // turn the experimental enrollment endpoint on in a developer or production
+  // process where a real media worker could be present.
+  V2_TRANSCRIPT_FAKE_RUNTIME_ENABLED: BooleanStringSchema.default('false'),
 }).superRefine((env, context) => {
   if (new URL(env.DATABASE_URL).pathname === '/online_learning') {
     context.addIssue({ code: z.ZodIssueCode.custom, path: ['DATABASE_URL'], message: '历史 online_learning 数据库受保护，请使用独立 echoflow 数据库' })
@@ -59,6 +63,9 @@ export const ServerEnvSchema = z.object({
     for (const key of ['MOSS_BASE_URL', 'MOSS_API_TOKEN', 'MOSS_CALLBACK_SECRET', 'MOSS_CALLBACK_PUBLIC_URL'] as const) {
       if (!env[key]) context.addIssue({ code: z.ZodIssueCode.custom, path: [key], message: '启用 MOSS 时必须显式配置' })
     }
+  }
+  if (env.V2_TRANSCRIPT_FAKE_RUNTIME_ENABLED && env.NODE_ENV !== 'test') {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['V2_TRANSCRIPT_FAKE_RUNTIME_ENABLED'], message: 'v2 Fake runtime 只能在测试环境启用' })
   }
   if (env.NODE_ENV !== 'production') return
   if (env.AUTH_EXPOSE_TEST_OTP) context.addIssue({ code: z.ZodIssueCode.custom, path: ['AUTH_EXPOSE_TEST_OTP'], message: '生产环境禁止返回测试 OTP' })

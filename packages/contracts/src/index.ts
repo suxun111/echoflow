@@ -149,6 +149,7 @@ export const HandoffCountsViewSchema = z.object({
   hR1: z.number().int().nonnegative(),
   hUnresolved: z.number().int().nonnegative(),
   hSegment: z.number().int().nonnegative(),
+  hProviderWord: z.number().int().nonnegative(),
   hAlignment: z.number().int().nonnegative(),
 }).strict()
 

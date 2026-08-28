@@ -56,8 +56,14 @@ F1 的边界建议严格收敛为“schema + 纯领域 + Fake + 数据库/单元
 - 最终 accepted evidenceType 白名单仅为 `strict_segment` 和 `boundary_forced_alignment`；`provider_native_word_timing` 初始固定不准入。任意缺失、重复、未分类或与左右身份/窗口/checksum 不一致的证据均失败关闭；
 - 只允许 revision `0 → 1`：revision 0 中必须“其他所有 handoff 已 accepted + 恰有一个 strict `ambiguous_segment_handoff`”，且其 repair code 仅可为 `no_textual_suffix_prefix`、`text_match_without_time_overlap`、`text_time_match_with_speaker_conflict`、`multiple_valid_alignments` 或 `weak_single_token_alignment`。该唯一 pair 才能 overlay；alignment 的 insufficient/ambiguous、输入错配、超时/取消、结果损坏或任一 identity/checksum 不一致均不得触发 repair。revision 1 必须重新物化全部当前 handoff，之后仍 unresolved 立即失败关闭，绝不创建 revision 2；
 - v1/v2 必须并存隔离；C1、已有 v1 run、旧 ACTIVE 和历史对象不得被 v2 部署、扫描或测试触发；
-- proof digest 必须使用独立的 `HANDOFF_PROOF_HMAC_KEY` 抽象，禁止复用 MOSS callback secret；F1 仅允许注入式 Fake，**不授权**新增生产 key 来源、环境变量、版本、轮换或 secret wiring。proof、raw result、对象键/URL、音频、正文、Token、外部 job ID 和 digest 均不得进入普通日志、Outbox、API 或测试快照；F1 的 Adapter Port、Fake 参数和测试 fixture/snapshot 仅可承载非内容 synthetic metadata，不能读取、产生或承载上述私有字段；
+- proof digest 必须使用独立的 `HANDOFF_PROOF_HMAC_KEY` 抽象，禁止复用 MOSS callback secret；F1 仅允许注入式 Fake，**不授权**新增生产 key 来源、环境变量、版本、轮换或 secret wiring。proof、raw result、对象键/URL、音频、正文、Token、外部 job ID 和 digest 均不得进入普通日志、Outbox、API 或测试快照；F1/F2 runtime 的 Adapter Port、Fake 参数和运行态 fixture/snapshot 仅可承载非内容 synthetic metadata，不能读取、产生或承载上述私有字段；
 - 任何约束失败、取消、旧 lease、重复/迟到结果或发布事务失败均不得产生半套 TranscriptVersion/Cue/Lesson，旧 ACTIVE 始终保持只读可见。
+
+### 3.1 2026-08-28 测试域术语澄清（不改变 F1/F2 运行态授权）
+
+F1 的纯领域 schema/identity 单元测试需要验证 `PrivateEvidenceEnvelope`、`HandoffEvidence` 与 idempotency validator 对字段形状、不可变性和 canonicalization 的处理。因此 `handoff.test.ts`、`evidencing.test.ts` 这类纯函数测试可使用固定、不可解析、带明确 F1-domain 语义（必要时由 marker seed 导出）的**合成字段值**，包括 object-identity/checksum 形状；这些值不是任何对象地址、内容 checksum 或可恢复的 raw identity。
+
+该窄例外仅限无 I/O 的纯领域测试：不得创建或读取对象，不得进入 API、Worker、queue、Outbox、Adapter runtime、log、callback、snapshot 或网络，且不得映射到真实或测试存储对象。F2 runtime、F2 runtime fixture 与其 Fake Adapter 仍不得承载任何对象键、版本、raw identity 或内容 checksum；本澄清绝不授权 accepted Fake alignment 物化 final evidence。
 
 ## 4. F1 拟议实现切面
 
@@ -67,7 +73,7 @@ F1 的边界建议严格收敛为“schema + 纯领域 + Fake + 数据库/单元
 | 领域模块 | 新建 handoff model、白名单 failure/decision、identity/checksum/window/revision validator、`H_*` 聚合和发布前断言。 | 参考但不复用 [merge.ts](../apps/worker/src/transcript/merge.ts) 的失败分类；禁止用其 merge 结果当 proof。 |
 | Adapter | 新建 `AlignmentAdapter` Port 和内存 Fake，接口仅覆盖 `submit/query/read/cancel` 的确定性测试语义。 | 与 [moss/adapter.ts](../apps/worker/src/moss/adapter.ts) 独立；不把 MFA 模拟成 MOSS `words[]`。 |
 | 数据库测试 | 真实 PostgreSQL 集成测试：final evidence 唯一性、不可变性、`H_*` 等式、revision 归属、事务回滚和 v1 兼容。 | 现有 [schema.test.ts](../packages/database/src/schema.test.ts) 只做文本级 schema 断言，不能代替集成测试。 |
-| 纯函数/Fake 测试 | strict accepted、strict insufficient → Fake alignment accepted、单 Chunk `H_total=0`、所有 identity mismatch 和 unresolved 失败关闭。 | 可复用 [transcript.test.ts](../apps/worker/src/processors/transcript.test.ts) 的 lease/原子发布思想，不接入其 v1 processor。 |
+| 纯函数/Fake 测试 | F1 纯领域的 strict accepted、strict insufficient → Fake alignment accepted、单 Chunk `H_total=0`、所有 identity mismatch 和 unresolved 失败关闭。 | 仅验证 schema/validator 语义；可复用 [transcript.test.ts](../apps/worker/src/processors/transcript.test.ts) 的 lease/原子发布思想，不接入其 v1 processor，也不授权 F2 runtime 成功路径。 |
 
 `HandoffEvidenceCallbackReceipt`、真实对象写入、对象清理器、`TranscriptRunArbiter`、v2 enrollment、Outbox/Worker/API 路由均明确延后；它们需要独立合同，不能在 F1 顺手加入。
 
@@ -95,10 +101,10 @@ S0 不能替代以下确认。为减少下一轮沟通成本，本合同给出�
 
 1. 新 migration 只能前向应用；测试只使用全新可丢弃 PostgreSQL 库，并以 synthetic v1 兼容 fixture 验证现有 v1 migration、schema 与读写保持兼容；不得在现有开发库、历史 run 或 C1 数据上迁移、backfill 或重解释；
 2. PostgreSQL 证明 handoff key 唯一、左右 Chunk 同 run/revision/相邻/不可自连、final evidence 一对一、assessment/final 边界和终态不可覆盖；并证明 current revision 归属、`H_total` 重算、`H_*` 非负和两组等式、accepted type 白名单以及 `H_providerWord=0`；
-3. strict accepted、strict insufficient 后 Fake alignment accepted、direct Fake alignment accepted 和 single-chunk `H_total=0` 均有确定性测试；
+3. F1 纯领域内 strict accepted、strict insufficient 后 Fake alignment accepted、direct Fake alignment accepted 和 single-chunk `H_total=0` 均有确定性测试；这些 schema/validator 测试不构成 F2 runtime 的对象身份或成功 evidence 授权；
 4. 无交接、单 token、多候选、时间/speaker 冲突、窗口越界、混合 granularity、缺字段和任一 identity/checksum 错配均失败关闭，不能发布；
 5. 只有“其他 handoff accepted + 恰一个 strict `ambiguous_segment_handoff` + 既有 repair-code 白名单”才可 `0 → 1`；两个歧义、任一 alignment insufficient/ambiguous、任一 identity/checksum 不匹配均不得创建 revision 1 或 revision 2；重复/迟到结果、旧 lease、取消和发布事务失败不复活、不覆盖、不产生半套字幕；
-6. Fake adapter 不读取真实 MFA、音频、模型、对象存储或网络；其 Port、参数、fixture 与 snapshot 只含非内容 synthetic metadata，不含私人文本/媒体、raw result、对象键/URL、digest 或真实/Fake secret；
+6. Fake adapter 不读取真实 MFA、音频、模型、对象存储或网络；F1/F2 runtime 的 Port、参数、fixture 与 snapshot 只含非内容 synthetic metadata，不含私人文本/媒体、raw result、对象键/URL、digest 或真实/Fake secret。第 3.1 节的 pure-domain marker 仅用于无 I/O schema/identity 单元测试，不得进入 runtime；
 7. v1 自动 enrollment、MOSS callback、ACTIVE transcript 读取、owner 隔离和现有 Worker/API 回归保持通过；
 8. 定向 TypeScript、数据库集成、F1 单元/Fake 测试、全仓 lint/test/build 都通过；审核后的最终 Commit 经独立 Reviewer P0/P1=0。
 
@@ -111,7 +117,7 @@ S0 不能替代以下确认。为减少下一轮沟通成本，本合同给出�
 - 需要创建真实 MFA Adapter、下载/调用模型、生成或处理 boundary audio、写入对象存储、决定 raw evidence 保留或清理；
 - 需要启动实际 MOSS、Docker 业务服务、公开 callback、外部网络传输或访问任何私人媒体；
 - 需要实现 `TranscriptRunArbiter`、v2 enrollment、API/Outbox/Worker 路由或改变 v1 retry/cancel/recovery；
-- 需要新增生产 proof key 的来源、环境变量、版本、轮换或 secret wiring，或让 Adapter/Fake/fixture/snapshot 承载 raw 音频、文本、raw result、对象键/URL 或 digest；
+- 需要新增生产 proof key 的来源、环境变量、版本、轮换或 secret wiring，或让 F1/F2 runtime 的 Adapter/Fake/fixture/snapshot 承载 raw 音频、文本、raw result、对象键/URL 或 digest；第 3.1 节的无 I/O pure-domain marker 不构成例外；
 - 需要更改用户删除、隐私告知、地域、预算、并发、密钥来源或公开接口。
 
 若你确认本合同的 **F1 范围及仅限测试的基础设施边界**，我会先将本文件状态改为“已确认”，再创建独立实施分支/工作树，逐项完成 F1 的 schema、纯领域、Fake 和测试；第 5 节除 F1 外的建议仍仅是待决记录，不构成本次确认。每次审核后绑定 Commit。F1 完成后，下一份合同才讨论 `TranscriptRunArbiter`、显式 enrollment、v2 Worker/Outbox/API 路由和受控对象生命周期。

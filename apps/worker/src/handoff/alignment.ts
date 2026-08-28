@@ -44,6 +44,14 @@ export interface AlignmentResultView {
 
 export interface AlignmentAdapter {
   submit(input: AlignmentSubmitInput): Promise<AlignmentSubmission>
+  /**
+   * Read the provider-side reservation by its stable idempotency identity.
+   *
+   * This is deliberately metadata-only.  It lets the runtime adopt a job
+   * that the provider accepted when the submit response was lost, instead of
+   * issuing a second submission for the same handoff.
+   */
+  findByIdempotencyKey(idempotencyKey: string): Promise<AlignmentSubmission | null>
   query(externalJobId: string): Promise<AlignmentStatusView>
   read(externalJobId: string): Promise<AlignmentResultView>
   cancel(externalJobId: string): Promise<void>
@@ -55,6 +63,10 @@ export const ALIGNMENT_ADAPTER_CODES = [
   'idempotency_collision',
   'invalid_submit_input',
   'duplicate_correlation_handle',
+  'response_lost',
+  'alignment_unavailable',
+  'alignment_timeout',
+  'alignment_rate_limited',
 ] as const
 export type AlignmentAdapterCode = (typeof ALIGNMENT_ADAPTER_CODES)[number]
 
@@ -88,8 +100,14 @@ export type ScriptedOutcome =
 export class InMemoryAlignmentAdapter implements AlignmentAdapter {
   private readonly jobsById = new Map<string, FakeJob>()
   private readonly jobsByCorrelation = new Map<string, FakeJob>()
+  private readonly jobsByIdempotency = new Map<string, FakeJob>()
   private readonly outcomes = new Map<string, ScriptedOutcome>()
+  private readonly queryErrors = new Map<string, AlignmentAdapterCode[]>()
+  private readonly findErrors: AlignmentAdapterCode[] = []
+  private readonly submitErrors: AlignmentAdapterCode[] = []
+  private loseNextSubmitResponse = false
   private counter = 0
+  private queries = 0
 
   scriptOutcome(externalJobId: string, outcome: ScriptedOutcome): void {
     this.outcomes.set(externalJobId, outcome)
@@ -99,7 +117,35 @@ export class InMemoryAlignmentAdapter implements AlignmentAdapter {
     return this.jobsById.size
   }
 
+  queryCount(): number {
+    return this.queries
+  }
+
+  /** Cause exactly one submit to persist the job but lose its response. */
+  scriptResponseLossOnce(): void {
+    this.loseNextSubmitResponse = true
+  }
+
+  /** Cause the next status query for a job to fail with a retryable code. */
+  scriptQueryErrorOnce(externalJobId: string, code: Extract<AlignmentAdapterCode, 'alignment_unavailable' | 'alignment_timeout' | 'alignment_rate_limited'>): void {
+    const errors = this.queryErrors.get(externalJobId) ?? []
+    errors.push(code)
+    this.queryErrors.set(externalJobId, errors)
+  }
+
+  /** Cause one idempotency lookup to fail before any provider state is read. */
+  scriptFindErrorOnce(code: Extract<AlignmentAdapterCode, 'alignment_unavailable' | 'alignment_timeout' | 'alignment_rate_limited'>): void {
+    this.findErrors.push(code)
+  }
+
+  /** Cause one pre-acceptance submit attempt to fail without creating a job. */
+  scriptSubmitErrorOnce(code: Extract<AlignmentAdapterCode, 'alignment_unavailable' | 'alignment_timeout' | 'alignment_rate_limited'>): void {
+    this.submitErrors.push(code)
+  }
+
   async submit(input: AlignmentSubmitInput): Promise<AlignmentSubmission> {
+    const scriptedError = this.submitErrors.shift()
+    if (scriptedError) throw new AlignmentAdapterError(scriptedError, 'scripted retryable alignment submit failure')
     if (!input.idempotencyKey || !input.correlationHandle || input.windowEndMs <= input.windowStartMs) {
       throw new AlignmentAdapterError('invalid_submit_input', 'submit input is missing required non-content metadata')
     }
@@ -116,12 +162,28 @@ export class InMemoryAlignmentAdapter implements AlignmentAdapter {
     const job: FakeJob = { input, externalJobId, state: 'PENDING', result: null }
     this.jobsById.set(externalJobId, job)
     this.jobsByCorrelation.set(input.correlationHandle, job)
+    this.jobsByIdempotency.set(input.idempotencyKey, job)
+    if (this.loseNextSubmitResponse) {
+      this.loseNextSubmitResponse = false
+      throw new AlignmentAdapterError('response_lost', 'provider accepted the submission but the response was lost')
+    }
     return { correlationHandle: input.correlationHandle, externalJobId }
   }
 
+  async findByIdempotencyKey(idempotencyKey: string): Promise<AlignmentSubmission | null> {
+    const scriptedError = this.findErrors.shift()
+    if (scriptedError) throw new AlignmentAdapterError(scriptedError, 'scripted retryable alignment lookup failure')
+    const job = this.jobsByIdempotency.get(idempotencyKey)
+    return job ? { correlationHandle: job.input.correlationHandle, externalJobId: job.externalJobId } : null
+  }
+
   async query(externalJobId: string): Promise<AlignmentStatusView> {
+    this.queries += 1
     const job = this.jobsById.get(externalJobId)
     if (!job) throw new AlignmentAdapterError('job_not_found', 'unknown external job id')
+    const errors = this.queryErrors.get(externalJobId)
+    const scriptedError = errors?.shift()
+    if (scriptedError) throw new AlignmentAdapterError(scriptedError, 'scripted retryable alignment query failure')
     const outcome = this.outcomes.get(externalJobId)
     const state = outcome ? outcome.state : job.state
     return { externalJobId, state, code: outcome && 'result' in outcome ? outcome.result.decisionCode : null }

@@ -47,8 +47,16 @@ export class MossCallbackController {
     return this.database.$transaction(async (transaction) => {
       const chunk = await transaction.processingChunk.findFirst({
         where: { externalJobId: body.externalJobId, idempotencyKey: body.idempotencyKey },
-        include: { processingRun: { select: { id: true, mediaAssetId: true, status: true } } },
+        include: { processingRun: { select: { id: true, mediaAssetId: true, status: true, pipelineVersion: true } } },
       })
+      // F2 has no real v2 MOSS adapter or callback contract.  Do not even
+      // persist a receipt for a stale/misrouted v2 callback: receipt metadata
+      // includes provider job identifiers which are outside the v2 Fake
+      // boundary.  Returning a stable ignored result is intentionally more
+      // conservative than replay tracking here.
+      if (chunk?.processingRun.pipelineVersion === 'g3-transcript-v2') {
+        return { accepted: true, duplicate: false, ignored: true }
+      }
       const inserted = await transaction.mossCallbackReceipt.createMany({
         data: [{
           eventId: verified.eventId,
@@ -79,7 +87,6 @@ export class MossCallbackController {
         || ['FAILED', 'CANCELLED'].includes(chunk.processingRun.status)) {
         return { accepted: true, duplicate: false }
       }
-
       let changed: { count: number }
       if (body.status === 'failed' || body.status === 'cancelled') {
         changed = await transaction.processingChunk.updateMany({

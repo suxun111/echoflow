@@ -1,3 +1,8 @@
+/**
+ * F1 pure-domain schema tests. Marker values below are non-resolvable and
+ * never reach the F2 API, Worker, queue, storage, adapter, logs, or network.
+ */
+
 import { describe, expect, it } from 'vitest'
 import { createHash } from 'node:crypto'
 import {
@@ -31,7 +36,7 @@ function chunk(index: number, overrides: Partial<ChunkIdentity> = {}): ChunkIden
     planRevision: 0,
     chunkIndex: index,
     status: 'SUCCEEDED',
-    resultObjectKey: 'asr://synthetic/left',
+    resultObjectKey: 'f1-domain-marker-asr-left',
     resultVersionId: `v-${index}`,
     resultChecksum: hex64(`asr-${index}`),
     ...overrides,
@@ -64,10 +69,10 @@ function expectedIdentity(overrides: Partial<ExpectedEvidenceIdentity> = {}): Ex
     logicalHandoffIndex: 0,
     previousChunkId: 'chunk-0-synthetic',
     nextChunkId: 'chunk-1-synthetic',
-    previousAsrObjectKey: 'asr://synthetic/left',
+    previousAsrObjectKey: 'f1-domain-marker-asr-left',
     previousAsrVersionId: 'v-0',
     previousAsrChecksum: hex64('asr-0'),
-    nextAsrObjectKey: 'asr://synthetic/right',
+    nextAsrObjectKey: 'f1-domain-marker-asr-right',
     nextAsrVersionId: 'v-1',
     nextAsrChecksum: hex64('asr-1'),
     normalizedAudioVersionId: 'audio-v-1',
@@ -91,10 +96,10 @@ function evidenceView(overrides: Partial<EvidenceIdentityView> = {}): EvidenceId
     evidenceType: 'strict_segment',
     previousChunkId: 'chunk-0-synthetic',
     nextChunkId: 'chunk-1-synthetic',
-    previousAsrObjectKey: 'asr://synthetic/left',
+    previousAsrObjectKey: 'f1-domain-marker-asr-left',
     previousAsrVersionId: 'v-0',
     previousAsrChecksum: hex64('asr-0'),
-    nextAsrObjectKey: 'asr://synthetic/right',
+    nextAsrObjectKey: 'f1-domain-marker-asr-right',
     nextAsrVersionId: 'v-1',
     nextAsrChecksum: hex64('asr-1'),
     normalizedAudioVersionId: 'audio-v-1',
@@ -402,11 +407,11 @@ describe('buildAlignmentIdempotencyKey', () => {
     planRevision: 0,
     logicalHandoffIndex: 0,
     previousChunkId: 'chunk-0-synthetic',
-    previousAsrObjectKey: 'asr://synthetic/left',
+    previousAsrObjectKey: 'f1-domain-marker-asr-left',
     previousAsrVersionId: 'v-0',
     previousAsrChecksum: hex64('asr-0'),
     nextChunkId: 'chunk-1-synthetic',
-    nextAsrObjectKey: 'asr://synthetic/right',
+    nextAsrObjectKey: 'f1-domain-marker-asr-right',
     nextAsrVersionId: 'v-1',
     nextAsrChecksum: hex64('asr-1'),
     normalizedAudioVersionId: 'audio-v-1',
@@ -434,7 +439,7 @@ describe('buildAlignmentIdempotencyKey', () => {
   })
 })
 
-describe('strict insufficient -> Fake alignment accepted -> publish chain', () => {
+describe('F1 pure-domain strict insufficient -> Fake alignment accepted -> publish chain', () => {
   it('turns a strict insufficient into an accepted boundary_forced_alignment and publishes', async () => {
     // 1. strict segment assessment fails closed with no_handoff_text.
     const assessment = validateStrictSegment(strictInput({ candidates: [] }))
@@ -449,11 +454,11 @@ describe('strict insufficient -> Fake alignment accepted -> publish chain', () =
         planRevision: 0,
         logicalHandoffIndex: 0,
         previousChunkId: 'chunk-0-synthetic',
-        previousAsrObjectKey: 'asr://synthetic/left',
+        previousAsrObjectKey: 'f1-domain-marker-asr-left',
         previousAsrVersionId: 'v-0',
         previousAsrChecksum: hex64('asr-0'),
         nextChunkId: 'chunk-1-synthetic',
-        nextAsrObjectKey: 'asr://synthetic/right',
+        nextAsrObjectKey: 'f1-domain-marker-asr-right',
         nextAsrVersionId: 'v-1',
         nextAsrChecksum: hex64('asr-1'),
         normalizedAudioVersionId: 'audio-v-1',
@@ -506,10 +511,10 @@ describe('FakeProofDigestService', () => {
     logicalHandoffIndex: 0,
     previousChunkId: 'chunk-0-synthetic',
     nextChunkId: 'chunk-1-synthetic',
-    previousAsrObjectKey: 'asr://synthetic/left',
+    previousAsrObjectKey: 'f1-domain-marker-asr-left',
     previousAsrVersionId: 'v-0',
     previousAsrChecksum: hex64('asr-0'),
-    nextAsrObjectKey: 'asr://synthetic/right',
+    nextAsrObjectKey: 'f1-domain-marker-asr-right',
     nextAsrVersionId: 'v-1',
     nextAsrChecksum: hex64('asr-1'),
     normalizedAudioVersionId: 'audio-v-1',

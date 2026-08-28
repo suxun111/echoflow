@@ -1,10 +1,11 @@
+import { createHash } from 'node:crypto'
 import { Controller, Get, Headers, Inject, Module, Param, Post } from '@nestjs/common'
 import type { ServerEnv } from '@online-learning/config'
 import {
   ActiveTranscriptViewSchema, MAX_UPLOAD_DURATION_MS, TranscriptWordSchema,
   type AuthUser, type MediaAssetView,
 } from '@online-learning/contracts'
-import { G3_PIPELINE_VERSION_V2, Prisma, arbitrateTranscriptRun } from '@online-learning/database'
+import { G3_PIPELINE_VERSION_V2, MAX_V2_ENROLL_DURATION_MS, Prisma, arbitrateTranscriptRun } from '@online-learning/database'
 import { ApiException } from '../../common/api-exception'
 import { CurrentUser } from '../../common/auth.decorators'
 import { SERVER_ENV } from '../../config/app-config.module'
@@ -44,6 +45,18 @@ function mapEnrollmentNotEligible(reason: string): ApiException {
   }
 }
 
+function opaqueV2RequestIdentity(
+  action: 'enroll' | 'cancel',
+  ownerId: string,
+  mediaAssetId: string,
+  idempotencyKey: string,
+) {
+  const digest = createHash('sha256')
+    .update(`echoflow:g3:v2:${action}\u0000${ownerId}\u0000${mediaAssetId}\u0000${idempotencyKey}`)
+    .digest('hex')
+  return `g3-v2-${action}:${digest}`
+}
+
 function toView(asset: {
   id: string
   uploadSessionId: string | null
@@ -61,16 +74,19 @@ function toView(asset: {
     pendingPlanRevision: number | null
     chunks: Array<{ chunkIndex: number; planRevision: number; status: string }>
     handoffs?: Array<{ logicalHandoffIndex: number; planRevision: number; status: string }>
-    transcriptVersions?: Array<{
-      hTotal: number; hUnique: number; hR1: number; hUnresolved: number; hSegment: number; hAlignment: number
+  transcriptVersions?: Array<{
+      hTotal: number; hUnique: number; hR1: number; hUnresolved: number; hSegment: number; hProviderWord: number; hAlignment: number
     }>
   }>
   createdAt: Date
   updatedAt: Date
 }): MediaAssetView {
   const playbackRun = asset.processingRuns?.find((run) => run.pipelineVersion === 'g2-playback-v1')
-  const transcriptRun = asset.processingRuns?.find((run) => run.pipelineVersion === 'g3-transcript-v1')
-    ?? asset.processingRuns?.find((run) => run.pipelineVersion === 'g3-transcript-v2')
+  // A v2 run can only be created after its v1 predecessor is failed or
+  // cancelled.  Prefer it in the owner view so a stale v1 record cannot hide
+  // the active v2 state or its desensitized H_* counters.
+  const transcriptRun = asset.processingRuns?.find((run) => run.pipelineVersion === 'g3-transcript-v2')
+    ?? asset.processingRuns?.find((run) => run.pipelineVersion === 'g3-transcript-v1')
   const transcriptChunks = transcriptRun
     ? effectivePlanChunks(transcriptRun.chunks, currentPlanRevision(transcriptRun))
     : []
@@ -102,8 +118,8 @@ function handoffCountsView(run: {
   activePlanRevision: number
   pendingPlanRevision: number | null
   handoffs?: Array<{ logicalHandoffIndex: number; planRevision: number; status: string }>
-  transcriptVersions?: Array<{
-    hTotal: number; hUnique: number; hR1: number; hUnresolved: number; hSegment: number; hAlignment: number
+    transcriptVersions?: Array<{
+    hTotal: number; hUnique: number; hR1: number; hUnresolved: number; hSegment: number; hProviderWord: number; hAlignment: number
   }>
 }) {
   const revision = currentPlanRevision(run)
@@ -117,6 +133,7 @@ function handoffCountsView(run: {
     hR1: latest?.hR1 ?? 0,
     hUnresolved: latest?.hUnresolved ?? 0,
     hSegment: latest?.hSegment ?? 0,
+    hProviderWord: latest?.hProviderWord ?? 0,
     hAlignment: latest?.hAlignment ?? 0,
   }
 }
@@ -138,7 +155,7 @@ export class MediaAssetsController {
         activePlanRevision: true, pendingPlanRevision: true,
         chunks: { select: { chunkIndex: true, planRevision: true, status: true } },
         handoffs: { select: { logicalHandoffIndex: true, planRevision: true, status: true } },
-        transcriptVersions: { select: { hTotal: true, hUnique: true, hR1: true, hUnresolved: true, hSegment: true, hAlignment: true } },
+        transcriptVersions: { select: { hTotal: true, hUnique: true, hR1: true, hUnresolved: true, hSegment: true, hProviderWord: true, hAlignment: true } },
       },
     } as const
   }
@@ -332,6 +349,97 @@ export class MediaAssetsController {
     }, { maxWait: 5_000, timeout: 15_000 })
   }
 
+  /**
+   * F2-only v2 cancellation is intentionally separate from the established
+   * v1 MOSS cancellation endpoint.  It is a local database state transition:
+   * no adapter, storage, media or network call is reachable from here.
+   */
+  @Post(':mediaAssetId/transcript/cancel-v2')
+  async cancelTranscriptV2(
+    @CurrentUser() user: AuthUser,
+    @Param('mediaAssetId') mediaAssetId: string,
+    @Headers('idempotency-key') idempotencyKey?: string,
+  ) {
+    if (!idempotencyKey || !/^[A-Za-z0-9._:-]{8,255}$/.test(idempotencyKey)) {
+      throw new ApiException(400, 'invalid_request', '需要有效的 Idempotency-Key')
+    }
+    if (this.env.NODE_ENV !== 'test' || !this.env.V2_TRANSCRIPT_FAKE_RUNTIME_ENABLED) {
+      throw new ApiException(503, 'service_unavailable', 'v2 字幕处理目前仅在隔离测试环境可用')
+    }
+    const requestIdentity = opaqueV2RequestIdentity('cancel', user.id, mediaAssetId, idempotencyKey)
+    return this.database.$transaction(async (transaction) => {
+      await transaction.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${mediaAssetId}, 0))`
+      const asset = await transaction.mediaAsset.findFirst({
+        where: { id: mediaAssetId, ownerId: user.id, deletedAt: null },
+        include: { processingRuns: { where: { pipelineVersion: G3_PIPELINE_VERSION_V2 }, take: 1 } },
+      })
+      if (!asset) throw new ApiException(404, 'not_found', '媒体资产不存在')
+      const run = asset.processingRuns[0]
+      if (!run) throw new ApiException(409, 'transcript_not_ready', 'v2 字幕任务尚未创建')
+      if (!run.requestId || !/^g3-v2-enroll:[A-Za-z0-9._:-]{8,128}$/.test(run.requestId)) {
+        throw new ApiException(409, 'transcript_not_ready', 'v2 字幕任务缺少隔离队列句柄')
+      }
+
+      const replay = await transaction.idempotencyRecord.findUnique({
+        where: { ownerId_scope_key: { ownerId: user.id, scope: 'transcript-v2-cancel', key: requestIdentity } },
+      })
+      if (replay) {
+        return { cancelled: true, pipelineVersion: G3_PIPELINE_VERSION_V2, duplicate: true }
+      }
+      if (!['QUEUED', 'PROCESSING', 'VALIDATING'].includes(run.status)) {
+        throw new ApiException(409, 'transcript_not_ready', 'v2 字幕任务已处于终态')
+      }
+
+      const now = new Date()
+      await transaction.processingRun.update({
+        where: { id: run.id },
+        data: {
+          status: 'CANCELLED', errorCode: 'processing_cancelled', completedAt: now,
+          leaseOwner: null, leaseExpiresAt: null,
+        },
+      })
+      await transaction.processingHandoff.updateMany({
+        where: { processingRunId: run.id, status: { in: ['PENDING', 'ASSESSING', 'ALIGNING'] } },
+        data: { status: 'CANCELLED', cancelledAt: now, leaseOwner: null, leaseExpiresAt: null },
+      })
+      await transaction.alignmentJob.updateMany({
+        where: { handoff: { processingRunId: run.id }, status: { in: ['PENDING', 'SUBMITTED', 'POLLING'] } },
+        data: {
+          status: 'CANCELLED', errorCode: 'processing_cancelled', cancelledAt: now,
+          nextPollAt: null, nextAttemptAt: null, leaseOwner: null, leaseExpiresAt: null,
+        },
+      })
+      await transaction.outboxEvent.updateMany({
+        where: {
+          aggregateId: run.id, status: 'PENDING',
+          eventType: 'media.transcript_process.v2',
+        },
+        data: { status: 'FAILED', lastError: 'processing_cancelled' },
+      })
+      // This is the only v2 cancellation event.  It is consumed exclusively
+      // by the test-only Fake worker route, which may confirm cancellation of
+      // an already-fenced Fake alignment job.  No real adapter or media path
+      // is reachable from this payload.
+      await transaction.outboxEvent.create({
+        data: {
+          aggregateType: 'ProcessingRun', aggregateId: run.id,
+          eventType: 'media.transcript_cancel_requested.v2',
+          idempotencyKey: requestIdentity,
+          payload: { v2JobHandle: run.requestId },
+        },
+      })
+      await transaction.idempotencyRecord.create({
+        data: {
+          ownerId: user.id, scope: 'transcript-v2-cancel', key: requestIdentity, requestHash: requestIdentity.split(':')[1]!,
+          responseStatus: 201,
+          responseBody: { cancelled: true, pipelineVersion: G3_PIPELINE_VERSION_V2 },
+          expiresAt: new Date(now.getTime() + 24 * 60 * 60_000),
+        },
+      })
+      return { cancelled: true, pipelineVersion: G3_PIPELINE_VERSION_V2, duplicate: false }
+    }, { maxWait: 5_000, timeout: 15_000 })
+  }
+
   @Post(':mediaAssetId/transcript/enroll-v2')
   async enrollTranscriptV2(
     @CurrentUser() user: AuthUser,
@@ -341,26 +449,31 @@ export class MediaAssetsController {
     if (!idempotencyKey || !/^[A-Za-z0-9._:-]{8,255}$/.test(idempotencyKey)) {
       throw new ApiException(400, 'invalid_request', '需要有效的 Idempotency-Key')
     }
+    if (this.env.NODE_ENV !== 'test' || !this.env.V2_TRANSCRIPT_FAKE_RUNTIME_ENABLED) {
+      throw new ApiException(503, 'service_unavailable', 'v2 字幕处理目前仅在隔离测试环境可用')
+    }
     if (!this.env.V2_TRANSCRIPT_ALLOWLIST.includes(user.id)) {
       throw new ApiException(403, 'enrollment_not_allowlisted', '当前账号未获准使用 v2 字幕处理')
     }
+    const requestIdentity = opaqueV2RequestIdentity('enroll', user.id, mediaAssetId, idempotencyKey)
     return this.database.$transaction(async (transaction) => {
       const outcome = await arbitrateTranscriptRun(transaction, {
         mediaAssetId,
         pipelineVersion: G3_PIPELINE_VERSION_V2,
-        startStage: 'PLAYBACK_READY',
+        startStage: 'HANDOFF_EVIDENCING',
         eventType: 'media.transcript_process.v2',
-        idempotencyKey: `transcript-enroll-v2:${user.id}:${mediaAssetId}:${idempotencyKey}`,
+        idempotencyKey: requestIdentity,
         ownerId: user.id,
         requireNoActiveTranscript: true,
-        maxDurationMs: MAX_UPLOAD_DURATION_MS,
-        requestKey: idempotencyKey,
+        maxDurationMs: MAX_V2_ENROLL_DURATION_MS,
+        explicitEnrollment: true,
+        queueCorrelationHandle: requestIdentity,
       })
       switch (outcome.kind) {
         case 'created':
-          return { enrolled: true, processingRunId: outcome.processingRunId, pipelineVersion: G3_PIPELINE_VERSION_V2, duplicate: false }
+          return { enrolled: true, pipelineVersion: G3_PIPELINE_VERSION_V2, duplicate: false }
         case 'idempotent':
-          return { enrolled: true, processingRunId: outcome.processingRunId, pipelineVersion: G3_PIPELINE_VERSION_V2, duplicate: true }
+          return { enrolled: true, pipelineVersion: G3_PIPELINE_VERSION_V2, duplicate: true }
         case 'conflict':
           throw new ApiException(409, 'transcript_pipeline_conflict', '另一条字幕流水线正持有该媒体')
         case 'not_eligible':

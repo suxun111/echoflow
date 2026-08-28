@@ -1,3 +1,8 @@
+/**
+ * F1 pure-domain schema tests. Marker values below are non-resolvable and
+ * never reach the F2 API, Worker, queue, storage, adapter, logs, or network.
+ */
+
 import { describe, expect, it } from 'vitest'
 import { createHash } from 'node:crypto'
 import {
@@ -22,7 +27,7 @@ function chunk(index: number, overrides: Partial<ChunkIdentity> = {}): ChunkIden
     planRevision: 0,
     chunkIndex: index,
     status: 'SUCCEEDED',
-    resultObjectKey: `asr://${index}`,
+    resultObjectKey: `f1-domain-marker-asr-${index}`,
     resultVersionId: `v-${index}`,
     resultChecksum: hex64(`asr-${index}`),
     ...overrides,
@@ -41,10 +46,10 @@ function expectedIdentity(): ExpectedEvidenceIdentity {
     logicalHandoffIndex: 0,
     previousChunkId: 'chunk-0',
     nextChunkId: 'chunk-1',
-    previousAsrObjectKey: 'asr://0',
+    previousAsrObjectKey: 'f1-domain-marker-asr-0',
     previousAsrVersionId: 'v-0',
     previousAsrChecksum: hex64('asr-0'),
-    nextAsrObjectKey: 'asr://1',
+    nextAsrObjectKey: 'f1-domain-marker-asr-1',
     nextAsrVersionId: 'v-1',
     nextAsrChecksum: hex64('asr-1'),
     normalizedAudioVersionId: 'audio-v-1',
@@ -134,9 +139,13 @@ describe('resolveStrictHandoff', () => {
 })
 
 describe('resolveAlignmentHandoff', () => {
-  const raw = { objectKey: 'raw-sentinel', versionId: 'raw-sentinel-v1', checksum: '0'.repeat(64) }
+  const raw = {
+    objectKey: 'f1-domain-marker-raw-identity',
+    versionId: 'f1-domain-marker-raw-v1',
+    checksum: '0'.repeat(64),
+  }
 
-  it('accepted -> boundary_forced_alignment evidence with raw identity', () => {
+  it('F1 pure-domain compatibility: accepted -> boundary_forced_alignment evidence with marker raw identity', () => {
     const resolution = resolveAlignmentHandoff({
       expected: expectedIdentity(),
       result: { externalJobId: 'fake-1', decision: 'accepted', decisionCode: 'evidence_accepted', candidateCount: 1, anchorCount: 2, coverageMs: 200 },
@@ -150,8 +159,23 @@ describe('resolveAlignmentHandoff', () => {
     if (resolution.kind !== 'accepted') return
     expect(resolution.evidence.evidenceType).toBe('boundary_forced_alignment')
     expect(resolution.evidence.anchorCount).toBe(2)
-    expect(resolution.evidence.rawObjectKey).toBe('raw-sentinel')
+    expect(resolution.evidence.rawObjectKey).toBe('f1-domain-marker-raw-identity')
     expect(resolution.evidence.rawChecksum).toBe('0'.repeat(64))
+  })
+
+  it('accepted alignment without a raw identity fails closed instead of creating partial evidence', () => {
+    const resolution = resolveAlignmentHandoff({
+      expected: expectedIdentity(),
+      result: { externalJobId: 'fake-no-raw', decision: 'accepted', decisionCode: 'evidence_accepted', candidateCount: 1, anchorCount: 2, coverageMs: 200 },
+      proof,
+      methodProvider: 'fake_alignment',
+      methodVersion: 'f2-runtime',
+      modelRevision: 'fake-model',
+    })
+    expect(resolution).toEqual({
+      kind: 'rejected', reason: 'insufficient', decisionCode: 'alignment_raw_unavailable',
+    })
+    expect(resolution).not.toHaveProperty('evidence')
   })
 
   it('insufficient -> rejected', () => {

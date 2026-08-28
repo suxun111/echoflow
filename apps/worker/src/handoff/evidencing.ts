@@ -162,7 +162,8 @@ export interface MaterializedEvidence {
 export interface AlignmentResolutionInput {
   expected: ExpectedEvidenceIdentity
   result: AlignmentResultView
-  raw: { objectKey: string; versionId: string; checksum: string }
+  /** Required only when an alignment result is accepted and materialized. */
+  raw?: { objectKey: string; versionId: string; checksum: string }
   proof: ProofDigestService
   methodProvider: string
   methodVersion: string
@@ -195,9 +196,13 @@ export function resolveStrictHandoff(
 /** Resolve an alignment result: accepted -> boundary_forced_alignment evidence. */
 export function resolveAlignmentHandoff(input: AlignmentResolutionInput): HandoffResolution {
   if (input.result.decision === 'accepted') {
+    const raw = input.raw
+    if (!raw) {
+      return { kind: 'rejected', reason: 'insufficient', decisionCode: 'alignment_raw_unavailable' }
+    }
     return {
       kind: 'accepted',
-      evidence: buildAlignmentEvidence(input),
+      evidence: buildAlignmentEvidence({ ...input, raw }),
     }
   }
   const decisionCode = (ALIGNMENT_INSUFFICIENT_CODES as readonly string[]).includes(input.result.decisionCode)
@@ -231,7 +236,9 @@ export function buildStrictSegmentEvidence(
 }
 
 /** Build a boundary_forced_alignment final evidence from an alignment result. */
-export function buildAlignmentEvidence(input: AlignmentResolutionInput): MaterializedEvidence {
+export function buildAlignmentEvidence(input: AlignmentResolutionInput & {
+  raw: { objectKey: string; versionId: string; checksum: string }
+}): MaterializedEvidence {
   return assembleEvidence(
     input.expected,
     {

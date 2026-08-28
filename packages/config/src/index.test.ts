@@ -66,4 +66,21 @@ describe('server environment safety', () => {
       MOSS_CALLBACK_PUBLIC_URL: 'http://api.echoflow.example/api/v1/integrations/moss/callback',
     })).toThrow()
   })
+
+  it('permits the v2 Fake runtime only in test mode', () => {
+    expect(() => loadServerEnv({
+      ...valid,
+      NODE_ENV: 'development',
+      V2_TRANSCRIPT_FAKE_RUNTIME_ENABLED: 'true',
+    })).toThrow()
+    expect(() => loadServerEnv({
+      ...valid,
+      V2_TRANSCRIPT_FAKE_RUNTIME_ENABLED: 'true',
+    })).toThrow()
+    expect(loadServerEnv({
+      ...valid,
+      NODE_ENV: 'test',
+      V2_TRANSCRIPT_FAKE_RUNTIME_ENABLED: 'true',
+    }).V2_TRANSCRIPT_FAKE_RUNTIME_ENABLED).toBe(true)
+  })
 })

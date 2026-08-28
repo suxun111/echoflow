@@ -37,6 +37,19 @@ describe('InMemoryAlignmentAdapter', () => {
     await expect(adapter.submit(submitInput())).rejects.toThrow(AlignmentAdapterError)
   })
 
+  it('allows a response-loss reservation to be adopted by its idempotency identity', async () => {
+    const adapter = new InMemoryAlignmentAdapter()
+    adapter.scriptResponseLossOnce()
+    await expect(adapter.submit(submitInput())).rejects.toMatchObject({ code: 'response_lost' })
+
+    const adopted = await adapter.findByIdempotencyKey('g3v2:fake-idempotency')
+    expect(adopted).toEqual({
+      correlationHandle: 'fake-correlation-handle-0001',
+      externalJobId: 'fake-align-1',
+    })
+    expect(adapter.submittedCount()).toBe(1)
+  })
+
   it('rejects a reused correlation handle', async () => {
     const adapter = new InMemoryAlignmentAdapter()
     await adapter.submit(submitInput())
@@ -60,7 +73,24 @@ describe('InMemoryAlignmentAdapter', () => {
     await expect(adapter.read(externalJobId)).rejects.toThrow(AlignmentAdapterError)
   })
 
-  it('returns a scripted accepted result deterministically', async () => {
+  it('can script a retryable query error without changing the persisted job identity', async () => {
+    const adapter = new InMemoryAlignmentAdapter()
+    const { externalJobId } = await adapter.submit(submitInput())
+    adapter.scriptQueryErrorOnce(externalJobId, 'alignment_timeout')
+    await expect(adapter.query(externalJobId)).rejects.toMatchObject({ code: 'alignment_timeout' })
+    await expect(adapter.query(externalJobId)).resolves.toMatchObject({ externalJobId, state: 'PENDING' })
+  })
+
+  it('can script transient lookup and submit failures without creating a provider reservation', async () => {
+    const adapter = new InMemoryAlignmentAdapter()
+    adapter.scriptFindErrorOnce('alignment_unavailable')
+    await expect(adapter.findByIdempotencyKey('g3v2:fake-idempotency')).rejects.toMatchObject({ code: 'alignment_unavailable' })
+    adapter.scriptSubmitErrorOnce('alignment_rate_limited')
+    await expect(adapter.submit(submitInput())).rejects.toMatchObject({ code: 'alignment_rate_limited' })
+    expect(adapter.submittedCount()).toBe(0)
+  })
+
+  it('returns a scripted provider-level accepted result deterministically (not final evidence)', async () => {
     const adapter = new InMemoryAlignmentAdapter()
     const { externalJobId } = await adapter.submit(submitInput())
     adapter.scriptOutcome(externalJobId, {
@@ -101,7 +131,7 @@ describe('InMemoryAlignmentAdapter', () => {
     await expect(adapter.cancel('unknown-job')).rejects.toThrow(AlignmentAdapterError)
   })
 
-  it('never exposes content fields in adapter I/O (shape guard)', async () => {
+  it('never exposes content or raw-object identity fields in adapter I/O (shape guard)', async () => {
     const adapter = new InMemoryAlignmentAdapter()
     const { externalJobId } = await adapter.submit(submitInput())
     adapter.scriptOutcome(externalJobId, {
@@ -110,9 +140,19 @@ describe('InMemoryAlignmentAdapter', () => {
     })
     const result = await adapter.read(externalJobId)
     const keys = Object.keys(result)
-    expect(keys).not.toContain('text')
-    expect(keys).not.toContain('audio')
-    expect(keys).not.toContain('rawPayload')
-    expect(keys).not.toContain('objectKey')
+    for (const forbidden of [
+      'text',
+      'audio',
+      'rawPayload',
+      'objectKey',
+      'versionId',
+      'checksum',
+      'url',
+      'proofDigest',
+      'rawChecksum',
+      'rawVersionId',
+    ]) {
+      expect(keys).not.toContain(forbidden)
+    }
   })
 })

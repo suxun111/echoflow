@@ -1,6 +1,5 @@
 import { Prisma, type PrismaClient } from '@online-learning/database'
 import type { MultipartStorageProvider } from '@online-learning/storage'
-import { isTranscriptObjectCleanupEligible, TRANSCRIPT_OBJECT_KINDS } from '../transcript/object-lifecycle'
 
 function metadataRunId(value: Prisma.JsonValue | null) {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -23,7 +22,10 @@ export async function cleanupTranscriptObjects(
   await storage.ensureVersioning()
   const candidates = await database.mediaObject.findMany({
     where: {
-      kind: { in: [...TRANSCRIPT_OBJECT_KINDS] },
+      // F2's v2 lifecycle policy is deliberately pure only.  The established
+      // cleanup worker continues to own its original v1 object kinds until a
+      // separately confirmed storage-lifecycle integration.
+      kind: { in: ['NORMALIZED_AUDIO', 'AUDIO_CHUNK', 'ASR_RAW'] },
       purgedAt: null,
       OR: [
         { deletedAt: { not: null } },
@@ -46,9 +48,20 @@ export async function cleanupTranscriptObjects(
         const currentRunId = metadataRunId(current.metadata)
         if (currentRunId !== processingRunId) return null
         const run = await transaction.processingRun.findFirst({
-          where: { id: processingRunId, mediaAssetId: current.mediaAssetId }, select: { status: true },
+          // This established cleanup worker owns only legacy v1 artifacts.
+          // Even anomalous v2 rows with a reused object kind must never reach
+          // a real storage delete until a separately confirmed lifecycle path.
+          where: {
+            id: processingRunId, mediaAssetId: current.mediaAssetId,
+            pipelineVersion: 'g3-transcript-v1',
+          },
+          select: { status: true },
         })
-        if (!isTranscriptObjectCleanupEligible(current, run, now)) return null
+        if (!run || !['SUCCEEDED', 'FAILED', 'CANCELLED'].includes(run.status)) return null
+        const retentionMs = current.kind === 'ASR_RAW'
+          ? 7 * 24 * 60 * 60_000
+          : 24 * 60 * 60_000
+        if (current.createdAt.getTime() > now.getTime() - retentionMs) return null
         if (!current.deletedAt) {
           const tombstoned = await transaction.mediaObject.updateMany({
             where: { id: current.id, versionId: current.versionId, deletedAt: null, purgedAt: null },

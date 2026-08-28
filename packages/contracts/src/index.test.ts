@@ -30,7 +30,7 @@ describe('G1 contracts', () => {
     expect(ProcessingStatusSchema.options).toEqual(['queued', 'processing', 'validating', 'succeeded', 'failed', 'cancelled'])
     expect(ProcessingStageSchema.options).toEqual([
       'upload_verified', 'probing', 'playback_ready', 'audio_extracting', 'chunking', 'transcribing',
-      'merging', 'cue_segmenting', 'validating', 'transcript_ready', 'course_ready',
+      'handoff_evidencing', 'merging', 'cue_segmenting', 'validating', 'transcript_ready', 'course_ready',
     ])
     expect(TranscriptStatusSchema.options).toEqual(['building', 'active', 'superseded', 'rejected'])
   })

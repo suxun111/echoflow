@@ -102,6 +102,9 @@ export async function cancelExternalTranscriptJobs(
   const run = await database.processingRun.findFirst({
     where: {
       id: job.processingRunId, mediaAssetId: job.mediaAssetId,
+      // Cancellation is a v1 MOSS operation.  Do not let a misnamed v2 job
+      // reach the real adapter even when it is already terminal.
+      pipelineVersion: G3_PIPELINE_VERSION,
       status: { in: ['CANCELLED', 'FAILED'] },
     },
     select: { id: true, status: true, activePlanRevision: true, pendingPlanRevision: true },
@@ -158,7 +161,13 @@ export async function cancelExternalTranscriptJobs(
   return { skipped: false, cancelled }
 }
 
-export type V2HandoffOptions = {
+/**
+ * Retired pre-F2 compatibility shape. It is intentionally private and has no
+ * runtime source: F2 uses handoff/runtime.ts instead of this real-media
+ * processor. Kept only while the surrounding v1 helper code is removed in a
+ * future focused cleanup.
+ */
+type RetiredV2HandoffOptions = {
   alignment: AlignmentAdapter
   proof: ProofDigestService
   assessment: StrictAssessmentInputProvider
@@ -175,8 +184,11 @@ type TranscriptProcessorOptions = {
   env: ServerEnv
   workerId: string
   now?: () => Date
-  /** Present only when the v2 HANDOFF_EVIDENCING route is enabled. */
-  handoff?: V2HandoffOptions
+}
+
+/** F2 deliberately has no legacy transcript-processor handoff injection. */
+function retiredV2Handoff(): RetiredV2HandoffOptions | undefined {
+  return undefined
 }
 
 async function checksum(bytes: Buffer) {
@@ -258,6 +270,7 @@ function effectivePlanChunks<T extends RevisionedChunk>(chunks: readonly T[], re
 }
 
 function mossIdempotencyKey(input: {
+  pipelineVersion: string
   sourceVersion: string
   planRevision: number
   chunkIndex: number
@@ -269,7 +282,7 @@ function mossIdempotencyKey(input: {
   modelVersion: string
 }) {
   const identity = createHash('sha256').update([
-    input.sourceVersion, G3_PIPELINE_VERSION, input.planRevision, input.chunkIndex,
+    input.sourceVersion, input.pipelineVersion, input.planRevision, input.chunkIndex,
     input.startMs, input.endMs, input.inputObjectKey, input.inputVersionId,
     input.inputChecksum, input.modelVersion,
   ].join('|')).digest('hex')
@@ -535,6 +548,7 @@ export function createTranscriptProcessor(options: TranscriptProcessorOptions) {
   async function prepareAudio(run: {
     id: string
     mediaAssetId: string
+    pipelineVersion: string
     mediaAsset: {
       ownerId: string
       durationMs: number | null
@@ -672,7 +686,7 @@ export function createTranscriptProcessor(options: TranscriptProcessorOptions) {
             processingRunId: run.id, planRevision: 0, chunkIndex: item.plan.chunkIndex,
             startMs: item.plan.startMs, endMs: item.plan.endMs,
             idempotencyKey: mossIdempotencyKey({
-              sourceVersion, planRevision: 0, chunkIndex: item.plan.chunkIndex,
+              pipelineVersion: run.pipelineVersion, sourceVersion, planRevision: 0, chunkIndex: item.plan.chunkIndex,
               startMs: item.plan.startMs, endMs: item.plan.endMs,
               inputObjectKey: item.object.objectKey, inputVersionId: item.object.versionId,
               inputChecksum: item.object.checksum, modelVersion: options.env.MOSS_MODEL_VERSION,
@@ -985,16 +999,12 @@ export function createTranscriptProcessor(options: TranscriptProcessorOptions) {
       if (released.count !== 1) throw new TranscriptLeaseLostError('transcript_lease_lost')
       return false
     }
-    const runMeta = await options.database.processingRun.findUniqueOrThrow({
-      where: { id: run.id }, select: { pipelineVersion: true },
-    })
-    const nextStage = runMeta.pipelineVersion === PIPELINE_VERSION_V2 ? 'HANDOFF_EVIDENCING' : 'MERGING'
     const advanced = await options.database.processingRun.updateMany({
       where: {
         id: run.id, status: 'PROCESSING', leaseOwner: leaseOwner(),
         leaseExpiresAt: { gt: now() },
       },
-      data: { stage: nextStage, leaseExpiresAt: new Date(now().getTime() + 5 * 60_000) },
+      data: { stage: 'MERGING', leaseExpiresAt: new Date(now().getTime() + 5 * 60_000) },
     })
     if (advanced.count !== 1) throw new TranscriptLeaseLostError('transcript_lease_lost')
     return true
@@ -1004,6 +1014,7 @@ export function createTranscriptProcessor(options: TranscriptProcessorOptions) {
     run: {
       id: string
       mediaAssetId: string
+      pipelineVersion: string
       mediaAsset: {
         ownerId: string
         durationMs: number | null
@@ -1108,7 +1119,7 @@ export function createTranscriptProcessor(options: TranscriptProcessorOptions) {
             processingRunId: run.id, planRevision: nextRevision, chunkIndex: item.plan.chunkIndex,
             startMs: item.plan.startMs, endMs: item.plan.endMs,
             idempotencyKey: mossIdempotencyKey({
-              sourceVersion, planRevision: nextRevision, chunkIndex: item.plan.chunkIndex,
+              pipelineVersion: run.pipelineVersion, sourceVersion, planRevision: nextRevision, chunkIndex: item.plan.chunkIndex,
               startMs: item.plan.startMs, endMs: item.plan.endMs,
               inputObjectKey: item.object.objectKey, inputVersionId: item.object.versionId,
               inputChecksum: item.object.checksum, modelVersion,
@@ -1176,7 +1187,8 @@ export function createTranscriptProcessor(options: TranscriptProcessorOptions) {
   ): ExpectedEvidenceIdentity {
     const windowStartMs = Math.min(previous.endMs, next.startMs)
     const windowEndMs = Math.max(previous.endMs, next.startMs) || windowStartMs + 1
-    const digest = (fallback: string) => options.handoff ? fallback : ''
+    const legacyHandoff = retiredV2Handoff()
+    const digest = (fallback: string) => legacyHandoff ? fallback : ''
     return {
       handoffId: handoff.id,
       processingRunId: runId,
@@ -1194,9 +1206,9 @@ export function createTranscriptProcessor(options: TranscriptProcessorOptions) {
       normalizedAudioChecksum: normalized.checksum,
       windowStartMs,
       windowEndMs,
-      methodDigest: options.handoff?.methodDigest ?? digest('m'),
-      modelDigest: options.handoff?.modelDigest ?? digest('m'),
-      configDigest: options.handoff?.configDigest ?? digest('c'),
+      methodDigest: legacyHandoff?.methodDigest ?? digest('m'),
+      modelDigest: legacyHandoff?.modelDigest ?? digest('m'),
+      configDigest: legacyHandoff?.configDigest ?? digest('c'),
       alignmentPolicyDigest: null,
     }
   }
@@ -1321,7 +1333,7 @@ export function createTranscriptProcessor(options: TranscriptProcessorOptions) {
     expected: ExpectedEvidenceIdentity,
     assessment: HandoffAssessmentRecord,
   ): Promise<'accepted' | 'waiting' | 'failed'> {
-    const handoff = options.handoff!
+    const handoff = retiredV2Handoff()!
     let job = await options.database.alignmentJob.findUnique({ where: { handoffId: record.id } })
     if (!job) {
       const idempotencyKey = buildAlignmentIdempotencyKey({
@@ -1393,11 +1405,10 @@ export function createTranscriptProcessor(options: TranscriptProcessorOptions) {
     const resolution = resolveAlignmentHandoff({
       expected,
       result,
-      raw: { objectKey: 'raw-sentinel', versionId: 'raw-sentinel-v1', checksum: '0'.repeat(64) },
       proof: handoff.proof,
-      methodProvider: 'mfa',
-      methodVersion: '3.3.9',
-      modelRevision: 'english_mfa-3.1.0',
+      methodProvider: 'retired_v2_route',
+      methodVersion: 'disabled',
+      modelRevision: null,
     })
     if (resolution.kind === 'accepted') {
       await options.database.alignmentJob.updateMany({
@@ -1423,7 +1434,7 @@ export function createTranscriptProcessor(options: TranscriptProcessorOptions) {
     next: EvidencingChunk,
     normalized: NormalizedIdentity,
   ): Promise<'accepted' | 'waiting' | 'failed'> {
-    const handoff = options.handoff!
+    const handoff = retiredV2Handoff()!
     validateHandoffPair(previous as ChunkIdentity, next as ChunkIdentity, planRevision)
     const record = await upsertHandoff(run.id, planRevision, handoffIndex, previous, next)
     if (record.status === 'EVIDENCED') return 'accepted'
@@ -1466,7 +1477,9 @@ export function createTranscriptProcessor(options: TranscriptProcessorOptions) {
   async function handoffEvidencing(
     run: { id: string; mediaAssetId: string; mediaAsset: { ownerId: string } },
   ): Promise<'completed' | 'waiting' | 'failed'> {
-    if (!options.handoff) return 'completed'
+    // If an old caller ever reintroduces this call, it must fail before it can
+    // touch v1 media/object paths or advance a v2 run.
+    if (!retiredV2Handoff()) return 'failed'
     const plan = await currentPlanChunks(run.id)
     const chunks = plan.chunks as unknown as EvidencingChunk[]
     if (chunks.length <= 1) {
@@ -1723,11 +1736,21 @@ export function createTranscriptProcessor(options: TranscriptProcessorOptions) {
   return async (job: TranscriptJob) => leaseOwnerContext.run(
     `${options.workerId}:${randomUUID()}`,
     async () => {
+    // No caller may reach real storage, FFmpeg or MOSS for a v2 run while F2
+    // is explicitly scoped to a test-only Fake state machine.
+    const target = await options.database.processingRun.findFirst({
+      where: { id: job.processingRunId, mediaAssetId: job.mediaAssetId },
+      select: { pipelineVersion: true },
+    })
+    if (!target) return { skipped: true }
+    if (target.pipelineVersion === PIPELINE_VERSION_V2) {
+      return { skipped: true, reason: 'v2_fake_runtime_only' }
+    }
     await ensureVersionedStorage()
     const claimed = await options.database.processingRun.updateMany({
       where: {
         id: job.processingRunId, mediaAssetId: job.mediaAssetId,
-        pipelineVersion: options.handoff ? { in: [G3_PIPELINE_VERSION, PIPELINE_VERSION_V2] } : G3_PIPELINE_VERSION,
+        pipelineVersion: G3_PIPELINE_VERSION,
         status: { in: ['QUEUED', 'PROCESSING', 'VALIDATING'] },
         OR: [{ leaseOwner: null }, { leaseExpiresAt: { lt: now() } }],
       },
@@ -1750,14 +1773,6 @@ export function createTranscriptProcessor(options: TranscriptProcessorOptions) {
       if (['PLAYBACK_READY', 'AUDIO_EXTRACTING', 'CHUNKING'].includes(run.stage)) await prepareAudio(run, directory)
       const refreshed = await options.database.processingRun.findUniqueOrThrow({ where: { id: run.id } })
       if (refreshed.stage === 'TRANSCRIBING' && !await transcribe(run, directory)) return { skipped: false, waiting: true }
-      if (options.handoff && run.pipelineVersion === PIPELINE_VERSION_V2) {
-        const afterTranscript = await options.database.processingRun.findUniqueOrThrow({ where: { id: run.id } })
-        if (afterTranscript.stage === 'HANDOFF_EVIDENCING') {
-          const evidencing = await handoffEvidencing(run)
-          if (evidencing === 'waiting') return { skipped: false, waiting: true }
-          if (evidencing === 'failed') return { skipped: false, failed: true, errorCode: 'transcript_incomplete' }
-        }
-      }
       const published = await publish(run, directory)
       return 'replanned' in published ? { skipped: false, waiting: true, replanned: true } : published
     } catch (error) {

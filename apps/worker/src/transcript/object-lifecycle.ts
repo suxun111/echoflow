@@ -2,12 +2,12 @@
  * G3 transcript object lifecycle policy (pure, deterministic).
  *
  * Defines the versioned, fenced retention policy for every transcript object
- * kind and the eligibility predicate the cleanup scanner uses. Purely a
- * decision function — no storage, no network, no media.
+ * kind. It is a pure decision function — no storage, no network, no media.
  *
  * F2 scope: HANDOFF_AUDIO ≈ 24h, ALIGNMENT_RAW ≤ 7d, orphan objects (a
  * tracked object whose processing run no longer exists) are immediately
- * eligible so they enter the same versioned cleanup queue.
+ * eligible. This policy is deliberately NOT connected to the production
+ * cleanup scanner until a separate storage-lifecycle contract is confirmed.
  */
 
 export const TRANSCRIPT_OBJECT_KINDS = [

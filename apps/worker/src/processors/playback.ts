@@ -164,6 +164,8 @@ export function createPlaybackProcessor(options: PlaybackProcessorOptions) {
       where: {
         id: job.processingRunId,
         mediaAssetId: job.mediaAssetId,
+        // A misrouted v2 job must fail closed before any storage/FFmpeg work.
+        pipelineVersion: 'g2-playback-v1',
         OR: [
           { status: 'QUEUED', stage: 'UPLOAD_VERIFIED' },
           { status: 'PROCESSING', stage: 'PROBING', leaseExpiresAt: { lt: now() } },

@@ -1,11 +1,17 @@
 /**
  * G3 v2 deterministic foundation — handoff domain types and whitelists.
  *
- * All values are NON-CONTENT metadata. Nothing in this module (or its
- * fixtures/tests) may carry subtitle text, tokens, word timings, audio
- * bytes, raw provider results, object keys/URLs, digests of private
- * content, or any secret. Identity fields are represented by opaque
- * synthetic identifiers only.
+ * All runtime values are NON-CONTENT metadata. Runtime code and F2 runtime
+ * fixtures must never carry subtitle text, tokens, word timings, audio
+ * bytes, raw provider results, resolvable object keys/URLs, digests of
+ * private content, or any secret.
+ *
+ * Narrow F1 pure-domain test exception: schema/identity unit tests may use
+ * fixed, non-resolvable marker values in fields whose *shape* is an object
+ * identity or checksum. Those values exist only to exercise validators and
+ * canonicalization; they perform no API, Worker, queue, storage, adapter,
+ * log, callback, or network I/O and do not authorize the F2 runtime to carry
+ * any raw identity.
  */
 
 export const SCHEMA_VERSION = '1'
@@ -56,6 +62,9 @@ export const ALIGNMENT_INSUFFICIENT_CODES = [
   'alignment_unavailable',
   'alignment_timeout',
   'alignment_rate_limited',
+  // A final alignment evidence record requires a separately-authorized
+  // immutable ALIGNMENT_RAW identity. F2 intentionally has none.
+  'alignment_raw_unavailable',
   'alignment_input_mismatch',
   'alignment_result_invalid',
   'alignment_cancelled',

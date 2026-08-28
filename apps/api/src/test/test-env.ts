@@ -3,7 +3,7 @@ import { loadServerEnv } from '@online-learning/config'
 export const G2TestDatabaseUrl = process.env.TEST_DATABASE_URL
   ?? 'postgresql://online_learning:online_learning@localhost:5432/echoflow_g2_integration_test'
 
-export function createTestEnv() {
+export function createTestEnv(overrides: Record<string, string | undefined> = {}) {
   return loadServerEnv({
     NODE_ENV: 'test',
     API_PORT: '3001',
@@ -34,5 +34,7 @@ export function createTestEnv() {
     MOSS_API_TOKEN: 'test-moss-api-token-long-enough',
     MOSS_CALLBACK_SECRET: 'test-moss-callback-secret-at-least-32-characters',
     MOSS_CALLBACK_PUBLIC_URL: 'https://api.test/api/v1/integrations/moss/callback',
+    V2_TRANSCRIPT_FAKE_RUNTIME_ENABLED: 'true',
+    ...overrides,
   })
 }
