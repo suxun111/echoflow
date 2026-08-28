@@ -239,6 +239,7 @@
 - 2026-08-23 的全新隔离真实约 31 分钟 EchoFlow→MOSS 运行：G2 上传后资产保持 `PLAYABLE`；revision 0 的 6 个真实 MOSS 分片均成功，严格合并触发唯一一次相邻 pair 的 revision 1 repair，revision 1 的 2 个替换分片也均成功。repair 后严格合并仍以 `FAILED / MERGING / transcript_incomplete` 终态关闭；按最高候选 revision 聚合的 6 块范围连续、无无效区间，但 `TranscriptVersion=0`、`ACTIVE=0`、Cue=0，owner 读取字幕返回 `409 transcript_not_ready`。独立审查本轮原子不发布与 revision 上限为 P0=0、P1=0；详见 [G3 本地验证证据](G3-LOCAL-VERIFICATION-EVIDENCE.md)；
 - 2026-08-23 已把“revision 1 后仍严格合并歧义”落实为内部、版本化、白名单结构诊断：只保留 failure class、候选计数、边界计数/时间、chunk index、被评估 revision 与 repair 决策；不持久化字幕正文、token、speaker 标签、对象键、UUID、URL 或原始错误消息。合成媒体 + Fake MOSS 的 revision `0 → 1 → FAILED` 回归、API overlay/权限/重试不变性与不泄露回归均通过。该合同不追溯性解释此前真实私人运行，也不改变严格判定或允许 revision 2；详见 [G3 本地验证证据](G3-LOCAL-VERIFICATION-EVIDENCE.md)；
 - 真实模型层面已证明“真实 30 秒模型 + Provider 协议 + 一次真实 5 分钟完整发布”，但未完成 30/60 分钟矩阵、真实故障恢复或人工准确率基准，因此 G3 不关闭；
+- 2026-08-29 已完成 G3 Web 的真实状态与开发态核验界面收敛：上传页不再把处理状态当作 ACTIVE 字幕，"我的视频"与开发态核验页只在 owner-scoped ACTIVE 字幕接口成功后显示字幕；该批不触碰 G3 运行态，也不开放 G4 学习功能。验证与未验证边界见 [G3 UI 后端核验证据](G3-UI-BACKEND-VALIDATION-EVIDENCE.md)；
 - G4 播放器、录音与进度以及 G5 生产发布继续冻结。
 
 ## G2 关闭证据

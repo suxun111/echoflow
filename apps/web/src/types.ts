@@ -5,7 +5,7 @@ export type Cue = {
   text: string
 }
 
-export type AppView = 'home' | 'discover' | 'favorites' | 'history' | 'vocabulary' | 'uploads' | 'settings'
+export type AppView = 'home' | 'discover' | 'favorites' | 'history' | 'vocabulary' | 'uploads' | 'settings' | 'integration-preview'
 
 export type Course = {
   id: string

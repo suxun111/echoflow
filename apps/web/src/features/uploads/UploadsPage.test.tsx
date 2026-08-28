@@ -165,7 +165,7 @@ describe('G2 upload page recovery behavior', () => {
     expect(await screen.findByText('上传已完整保存，正在检查视频是否可直接播放。')).toBeInTheDocument()
   })
 
-  it('never presents a playback-ready run as a completed transcript', async () => {
+  it('never presents a completed processing run as a confirmed transcript', async () => {
     const now = new Date().toISOString()
     const completed = {
       ...session, status: 'completed' as const, uploadedBytes: 11,
@@ -176,7 +176,7 @@ describe('G2 upload page recovery behavior', () => {
       originalName: session.originalName, status: 'playable', durationMs: 6_000,
       processingStage: 'playback_ready', errorCode: null,
       transcriptProcessing: {
-        status: 'succeeded', stage: 'playback_ready', completedChunks: 0, totalChunks: 0,
+        status: 'succeeded', stage: 'transcript_ready', completedChunks: 2, totalChunks: 2,
         errorCode: null, updatedAt: now,
       },
       createdAt: now, updatedAt: now,
@@ -191,9 +191,11 @@ describe('G2 upload page recovery behavior', () => {
 
     render(<UploadsPage api={api as never}/>)
 
-    expect(await screen.findByText('可以播放')).toBeInTheDocument()
-    expect(screen.getByText('原始清晰度视频已经准备好，等待字幕任务')).toBeInTheDocument()
+    expect(await screen.findByText('等待字幕确认')).toBeInTheDocument()
+    expect(screen.getByText('字幕处理已结束，请到“我的视频”确认完整英文字幕')).toBeInTheDocument()
     expect(screen.queryByText('字幕已完成')).not.toBeInTheDocument()
+    expect(screen.queryByText(/逐词/)).not.toBeInTheDocument()
+    expect(api.fetchJson).not.toHaveBeenCalledWith(`/media-assets/${playbackAsset.id}/transcript`, expect.anything())
   })
 
   it('shows the actionable codec guidance for a G2 media format failure', async () => {

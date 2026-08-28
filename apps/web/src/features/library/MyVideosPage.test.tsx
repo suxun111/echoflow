@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { MediaAssetView } from '@online-learning/contracts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { ApiClientError } from '../../lib/apiClient'
 import { MyVideosPage } from './MyVideosPage'
 
 const asset: MediaAssetView = {
@@ -71,10 +72,11 @@ describe('G2 signed playback recovery', () => {
       throw new Error(`unexpected ${path}`)
     }) }
     render(<MyVideosPage api={api as never} search="" onUpload={vi.fn()}/>)
-    await screen.findByText('完整英文逐词字幕已经原子发布')
-    fireEvent.click(screen.getByRole('button', { name: '查看字幕' }))
+    await screen.findByText('处理已结束；打开后会确认完整英文字幕是否可用。')
+    fireEvent.click(screen.getByRole('button', { name: '检查英文字幕' }))
     await screen.findByText('Hello podcast.')
-    expect(screen.getByText('1 句 · MOSS fake-moss-v1')).toBeInTheDocument()
+    expect(screen.getByText('1 句 · 已确认完整英文字幕')).toBeInTheDocument()
+    expect(screen.queryByText(/MOSS/)).not.toBeInTheDocument()
   })
 
   it('keeps the original playable on transcript failure and sends an idempotent retry', async () => {
@@ -95,7 +97,7 @@ describe('G2 signed playback recovery', () => {
       throw new Error(`unexpected ${path}`)
     }) }
     render(<MyVideosPage api={api as never} search="" onUpload={vi.fn()}/>)
-    await screen.findByText('原片仍可播放 · moss_timeout')
+    await screen.findByText('字幕处理暂未完成，原片仍可播放，可稍后重试。')
     expect(screen.getByRole('button', { name: '播放原片' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '重试字幕' }))
     await waitFor(() => expect(api.fetchJson).toHaveBeenCalledWith(
@@ -118,7 +120,7 @@ describe('G2 signed playback recovery', () => {
       throw new Error(`unexpected ${path}`)
     }) }
     render(<MyVideosPage api={api as never} search="" onUpload={vi.fn()}/>)
-    await screen.findByText(/超过 60 分钟的视频不能生成或重试字幕/)
+    await screen.findByText(/超过当前 60 分钟上限/)
     expect(screen.getByRole('button', { name: '播放原片' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '重试字幕' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '播放原片' }))
@@ -169,12 +171,33 @@ describe('G2 signed playback recovery', () => {
       throw new Error(`unexpected ${path}`)
     }) }
     render(<MyVideosPage api={api as never} search="" onUpload={vi.fn()}/>)
-    await screen.findByText('完整英文逐词字幕已经原子发布')
+    await screen.findByText('处理已结束；打开后会确认完整英文字幕是否可用。')
     expect(screen.getByRole('button', { name: '播放原片' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '查看字幕' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '检查英文字幕' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '重试字幕' })).not.toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '查看字幕' }))
+    fireEvent.click(screen.getByRole('button', { name: '检查英文字幕' }))
     await screen.findByText('Published before the limit changed.')
+  })
+
+  it('treats a transcript 409 as an honest not-ready state instead of showing a partial transcript', async () => {
+    const finished = {
+      ...asset,
+      transcriptProcessing: {
+        status: 'succeeded' as const, stage: 'transcript_ready' as const,
+        completedChunks: 2, totalChunks: 2, errorCode: null, updatedAt: new Date().toISOString(),
+      },
+    }
+    const api = { fetchJson: vi.fn(async (path: string) => {
+      if (path === '/media-assets') return { items: [finished] }
+      if (path === `/media-assets/${finished.id}/transcript`) {
+        throw new ApiClientError(409, { code: 'transcript_not_ready', message: '完整英文字幕尚未准备好', requestId: 'test-request' })
+      }
+      throw new Error(`unexpected ${path}`)
+    }) }
+    render(<MyVideosPage api={api as never} search="" onUpload={vi.fn()}/>)
+    fireEvent.click(await screen.findByRole('button', { name: '检查英文字幕' }))
+    await screen.findByText('完整英文字幕尚未准备好；不会显示部分字幕。')
+    expect(screen.queryByText('Hello podcast.')).not.toBeInTheDocument()
   })
 
   it('reuses the same retry identity when the first response is lost', async () => {
@@ -200,7 +223,7 @@ describe('G2 signed playback recovery', () => {
     render(<MyVideosPage api={api as never} search="" onUpload={vi.fn()}/>)
     const retry = await screen.findByRole('button', { name: '重试字幕' })
     fireEvent.click(retry)
-    await screen.findByText('response lost')
+    await screen.findByText('字幕暂时无法重新处理，请稍后再试。')
     fireEvent.click(retry)
     await waitFor(() => expect(retryKeys).toHaveLength(2))
     expect(retryKeys[0]).toMatch(/^web-/)

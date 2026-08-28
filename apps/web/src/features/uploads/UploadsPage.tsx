@@ -34,10 +34,12 @@ function statusCopy(upload: UploadSessionView, asset?: MediaAssetView) {
     if (asset?.errorCode === 'media_duration_unsupported') return ['视频时长超限', '当前仅支持 60 分钟以内的视频，请选择更短的文件']
     return ['不支持播放', asset?.errorCode === 'media_format_unsupported' ? '请重新上传 MP4 / H.264 / AAC 文件' : '对象或媒体检查失败，请重新上传原文件']
   }
-  if (asset?.status === 'playable'
-    && asset.transcriptProcessing?.status === 'succeeded'
-    && asset.transcriptProcessing.stage === 'transcript_ready') return ['字幕已完成', '完整英文逐词字幕已经准备好']
-  if (asset?.status === 'playable' && asset.transcriptProcessing?.status === 'failed') return ['字幕失败，原片可播', asset.transcriptProcessing.errorCode ?? '字幕任务失败，请在“我的视频”中重试']
+  if (asset?.status === 'playable' && asset.transcriptProcessing?.status === 'succeeded') {
+    return ['等待字幕确认', '字幕处理已结束，请到“我的视频”确认完整英文字幕']
+  }
+  if (asset?.status === 'playable' && ['failed', 'cancelled'].includes(asset.transcriptProcessing?.status ?? '')) {
+    return ['字幕处理未完成', '原片仍可播放；请到“我的视频”查看当前状态或重试']
+  }
   if (asset?.status === 'playable' && ['queued', 'processing', 'validating'].includes(asset.transcriptProcessing?.status ?? '')) {
     const state = asset.transcriptProcessing!
     return ['正在生成字幕', state.totalChunks ? `已完成 ${state.completedChunks}/${state.totalChunks} 个分片` : '正在提取并切分英文音频']
@@ -241,7 +243,7 @@ export function UploadsPage({ api }: { api: ApiClient }) {
     <header className="upload-hero">
       <div><p className="upload-eyebrow">YOUR PRIVATE SOURCE</p><h1>把长视频送进你的<br/><em>影子练习流。</em></h1></div>
       <p>原片直接进入私人对象存储，不经过应用服务器。中断后 7 天内选择同一文件，就从缺失的分片继续。</p>
-      <div className="journey-rail" aria-label="视频处理步骤"><span className="active">选择原片</span><i/><span>私人直传</span><i/><span>播放检查</span><i/><span className="future">完整字幕 · G3</span></div>
+      <div className="journey-rail" aria-label="视频处理步骤"><span className="active">选择原片</span><i/><span>私人直传</span><i/><span>播放检查</span><i/><span className="future">英文字幕</span></div>
     </header>
 
     <section className="upload-workspace">
@@ -263,9 +265,9 @@ export function UploadsPage({ api }: { api: ApiClient }) {
           <label className="rights-confirm"><input type="checkbox" checked={rightsConfirmed} onChange={(event) => setRightsConfirmed(event.target.checked)}/><span><strong>我确认拥有处理该视频的权利</strong><small>视频和后续字幕仅当前账号可见；请勿上传无权处理的内容。</small></span></label>
         </div>}
 
-        {(phase === 'uploading' || phase === 'paused' || phase === 'offline' || phase === 'verifying' || phase === 'done') && <div className="live-progress">
+        {(phase === 'uploading' || phase === 'paused' || phase === 'offline' || phase === 'verifying' || phase === 'done') && <div className="live-progress" role="status" aria-live="polite">
           <div><span>{phase === 'uploading' ? '正在上传' : phase === 'paused' ? '已暂停' : phase === 'offline' ? '等待网络' : phase === 'verifying' ? '正在核对' : '上传完成'}</span><strong>{progress}%</strong></div>
-          <div className="progress-track"><i style={{ width: `${progress}%` }}/></div>
+          <progress value={progress} max="100" aria-label="上传进度">{progress}%</progress><div className="progress-track" aria-hidden="true"><i style={{ width: `${progress}%` }}/></div>
           <small>{formatBytes(uploadedBytes)} / {formatBytes(file?.size ?? activeSession?.sizeBytes ?? 0)} · 已完成分片会保留到 {activeSession ? new Date(activeSession.expiresAt).toLocaleDateString('zh-CN') : '7 天后'}</small>
         </div>}
 

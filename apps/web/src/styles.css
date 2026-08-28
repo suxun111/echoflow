@@ -1,4 +1,3 @@
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap');
 @import './styles/base.css';
 @import './styles/layout.css';
 @import './styles/library.css';
@@ -7,3 +6,4 @@
 @import './styles/auth.css';
 @import './styles/responsive.css';
 @import './styles/study-enhancements.css';
+@import './styles/media-verification.css';
