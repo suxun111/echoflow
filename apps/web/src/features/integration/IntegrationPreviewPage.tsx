@@ -1,31 +1,39 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ActiveTranscriptViewSchema, PlaybackUrlSchema, type ActiveTranscriptView, type MediaAssetView } from '@online-learning/contracts'
+import type { ActiveTranscriptView, MediaAssetView, PlaybackUrl } from '@online-learning/contracts'
 import { Icon } from '../../components/Icon'
 import { ApiClientError, type ApiClient } from '../../lib/apiClient'
+import { parseActiveTranscriptView } from '../library/activeTranscript'
 import { describeTranscript, formatCueTimestamp, formatMediaDuration } from '../library/mediaStatus'
+import '../../styles/v1-learning-preview.css'
+import {
+  V1LearningPreview,
+  type V1PreviewPlaybackState,
+  type V1PreviewTranscriptState,
+} from './V1LearningPreview'
 
 const cuePreviewLimit = 12
 
-type PlaybackState =
-  | { kind: 'idle' }
-  | { kind: 'loading'; assetId: string }
-  | { kind: 'ready'; assetId: string; url: string }
-  | { kind: 'error'; assetId: string; message: string }
-
-type TranscriptState =
-  | { kind: 'idle' }
-  | { kind: 'loading'; assetId: string }
-  | { kind: 'ready'; assetId: string; value: ActiveTranscriptView }
-  | { kind: 'not-ready'; assetId: string }
-  | { kind: 'error'; assetId: string; message: string }
+function parsePlaybackUrl(value: unknown): PlaybackUrl {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error('invalid_playback_url')
+  const candidate = value as Record<string, unknown>
+  if (typeof candidate.mediaAssetId !== 'string' || candidate.mediaAssetId.length === 0) throw new Error('invalid_playback_url')
+  if (typeof candidate.playbackUrl !== 'string' || candidate.playbackUrl.length === 0) throw new Error('invalid_playback_url')
+  if (typeof candidate.expiresAt !== 'string' || !Number.isFinite(Date.parse(candidate.expiresAt))) throw new Error('invalid_playback_url')
+  try {
+    new URL(candidate.playbackUrl)
+  } catch {
+    throw new Error('invalid_playback_url')
+  }
+  return { mediaAssetId: candidate.mediaAssetId, playbackUrl: candidate.playbackUrl, expiresAt: candidate.expiresAt }
+}
 
 export function IntegrationPreviewPage({ api, onReturnToLibrary }: { api: ApiClient; onReturnToLibrary: () => void }) {
   const [assets, setAssets] = useState<MediaAssetView[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
-  const [playback, setPlayback] = useState<PlaybackState>({ kind: 'idle' })
-  const [transcript, setTranscript] = useState<TranscriptState>({ kind: 'idle' })
+  const [playback, setPlayback] = useState<V1PreviewPlaybackState>({ kind: 'idle' })
+  const [transcript, setTranscript] = useState<V1PreviewTranscriptState>({ kind: 'idle' })
   const selectedIdRef = useRef<string | null>(null)
   const requestVersions = useRef({ list: 0, playback: 0, transcript: 0 })
 
@@ -61,10 +69,10 @@ export function IntegrationPreviewPage({ api, onReturnToLibrary }: { api: ApiCli
 
   const selected = useMemo(() => assets.find((asset) => asset.id === selectedId) ?? null, [assets, selectedId])
   const transcriptCopy = selected ? describeTranscript(selected) : null
-  const playbackForSelected: PlaybackState = !selected || playback.kind === 'idle' || playback.assetId !== selected.id
+  const playbackForSelected: V1PreviewPlaybackState = !selected || playback.kind === 'idle' || playback.assetId !== selected.id
     ? { kind: 'idle' }
     : playback
-  const transcriptForSelected: TranscriptState = !selected || transcript.kind === 'idle' || transcript.assetId !== selected.id
+  const transcriptForSelected: V1PreviewTranscriptState = !selected || transcript.kind === 'idle' || transcript.assetId !== selected.id
     ? { kind: 'idle' }
     : transcript
   const activeTranscript = transcriptForSelected.kind === 'ready' ? transcriptForSelected.value : null
@@ -83,7 +91,7 @@ export function IntegrationPreviewPage({ api, onReturnToLibrary }: { api: ApiCli
     const requestVersion = ++requestVersions.current.playback
     setPlayback({ kind: 'loading', assetId })
     try {
-      const response = PlaybackUrlSchema.parse(await api.fetchJson<unknown>(`/media-assets/${assetId}/playback-url`, { method: 'POST' }))
+      const response = parsePlaybackUrl(await api.fetchJson<unknown>(`/media-assets/${assetId}/playback-url`, { method: 'POST' }))
       if (response.mediaAssetId !== assetId) throw new Error('播放地址与当前媒体不匹配')
       if (requestVersion !== requestVersions.current.playback || selectedIdRef.current !== assetId) return
       setPlayback({ kind: 'ready', assetId, url: response.playbackUrl })
@@ -100,7 +108,7 @@ export function IntegrationPreviewPage({ api, onReturnToLibrary }: { api: ApiCli
     const requestVersion = ++requestVersions.current.transcript
     setTranscript({ kind: 'loading', assetId })
     try {
-      const value = ActiveTranscriptViewSchema.parse(await api.fetchJson<unknown>(`/media-assets/${assetId}/transcript`))
+      const value = parseActiveTranscriptView(await api.fetchJson<unknown>(`/media-assets/${assetId}/transcript`))
       if (value.mediaAssetId !== assetId) throw new Error('字幕与当前媒体不匹配')
       if (requestVersion !== requestVersions.current.transcript || selectedIdRef.current !== assetId) return
       setTranscript({ kind: 'ready', assetId, value })
@@ -118,8 +126,8 @@ export function IntegrationPreviewPage({ api, onReturnToLibrary }: { api: ApiCli
     <header className="integration-preview-heading">
       <div>
         <p>DEVELOPMENT VERIFICATION</p>
-        <h1>媒体与字幕核验台</h1>
-        <span>只读取当前账号已有的媒体状态、播放地址和完整英文字幕；不会启动转写或修改媒体。</span>
+        <h1>V1 学习界面验证台</h1>
+        <span>用旧版学习框架承载当前账号的真实原片与 ACTIVE 英文字幕；不会启动转写或修改媒体。</span>
       </div>
       <div className="integration-preview-heading-actions">
         <button className="quiet-action" onClick={onReturnToLibrary}><Icon name="chevronLeft" size={16}/>返回我的视频</button>
@@ -154,6 +162,16 @@ export function IntegrationPreviewPage({ api, onReturnToLibrary }: { api: ApiCli
                 </div>
               </header>
 
+              <V1LearningPreview
+                key={selected.id}
+                asset={selected}
+                playback={playbackForSelected}
+                transcript={transcriptForSelected}
+                onVerifyPlayback={() => void verifyPlayback()}
+                onVerifyTranscript={() => void verifyTranscript()}
+              />
+
+              <div className="verification-detail-heading"><p>BACKEND VERIFICATION DETAIL</p><h3>接口核验明细</h3><span>用于分开检查播放地址与 ACTIVE 字幕响应。</span></div>
               <div className="verification-panels">
                 <section className="verification-player-panel" aria-labelledby="verification-player-title">
                   <div className="verification-panel-heading"><div><p>ORIGINAL PLAYBACK</p><h3 id="verification-player-title">原片播放</h3></div><span>{selected.status === 'playable' ? '可验证' : '等待原片检查'}</span></div>
@@ -175,6 +193,7 @@ export function IntegrationPreviewPage({ api, onReturnToLibrary }: { api: ApiCli
                   </div>}
                 </section>
               </div>
+
             </section>}
           </section>}
   </main>

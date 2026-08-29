@@ -52,7 +52,7 @@ export default function App() {
     {view === 'uploads'
       ? <UploadsPage api={api} />
       : view === 'integration-preview' && integrationPreviewEnabled
-        ? IntegrationPreviewPage && <Suspense fallback={<div className="route-loading" role="status">正在打开媒体验证台…</div>}><IntegrationPreviewPage api={api} onReturnToLibrary={() => openView('home')} /></Suspense>
+        ? IntegrationPreviewPage && <Suspense fallback={<div className="route-loading" role="status">正在打开 V1 学习验证台…</div>}><IntegrationPreviewPage api={api} onReturnToLibrary={() => openView('home')} /></Suspense>
         : <MyVideosPage api={api} search={deferredSearch} onUpload={() => openView('uploads')} />}
   </PlatformShell>
 }
