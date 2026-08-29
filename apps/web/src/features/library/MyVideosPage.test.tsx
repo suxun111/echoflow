@@ -229,4 +229,170 @@ describe('G2 signed playback recovery', () => {
     expect(retryKeys[0]).toMatch(/^web-/)
     expect(retryKeys[1]).toBe(retryKeys[0])
   })
+
+  it('fails closed when an ACTIVE transcript belongs to a different media asset', async () => {
+    const ready = {
+      ...asset,
+      transcriptProcessing: {
+        status: 'succeeded' as const, stage: 'transcript_ready' as const,
+        completedChunks: 1, totalChunks: 1, errorCode: null, updatedAt: new Date().toISOString(),
+      },
+    }
+    const api = { fetchJson: vi.fn(async (path: string) => {
+      if (path === '/media-assets') return { items: [ready] }
+      if (path === `/media-assets/${ready.id}/transcript`) return {
+        id: crypto.randomUUID(), mediaAssetId: crypto.randomUUID(), version: 1, language: 'en', durationMs: ready.durationMs,
+        cueCount: 1, pipelineVersion: 'g3-transcript-v1', modelVersion: 'untrusted-response', publishedAt: new Date().toISOString(),
+        cues: [{ id: crypto.randomUUID(), order: 0, startMs: 0, endMs: 1_000, text: 'Wrong asset subtitle.', words: [] }],
+      }
+      throw new Error(`unexpected ${path}`)
+    }) }
+
+    render(<MyVideosPage api={api as never} search="" onUpload={vi.fn()}/>)
+    fireEvent.click(await screen.findByRole('button', { name: '检查英文字幕' }))
+    await screen.findByText('暂时无法读取完整英文字幕，请稍后重试。')
+    expect(screen.queryByText('Wrong asset subtitle.')).not.toBeInTheDocument()
+    expect(screen.queryByText(/untrusted-response/)).not.toBeInTheDocument()
+  })
+
+  it('fails closed when an ACTIVE transcript payload does not match its declared cue count', async () => {
+    const ready = {
+      ...asset,
+      transcriptProcessing: {
+        status: 'succeeded' as const, stage: 'transcript_ready' as const,
+        completedChunks: 1, totalChunks: 1, errorCode: null, updatedAt: new Date().toISOString(),
+      },
+    }
+    const api = { fetchJson: vi.fn(async (path: string) => {
+      if (path === '/media-assets') return { items: [ready] }
+      if (path === `/media-assets/${ready.id}/transcript`) return {
+        id: crypto.randomUUID(), mediaAssetId: ready.id, version: 1, language: 'en', durationMs: ready.durationMs,
+        cueCount: 2, pipelineVersion: 'g3-transcript-v1', modelVersion: 'untrusted-response', publishedAt: new Date().toISOString(),
+        cues: [{ id: crypto.randomUUID(), order: 0, startMs: 0, endMs: 1_000, text: 'Incomplete response.', words: [] }],
+      }
+      throw new Error(`unexpected ${path}`)
+    }) }
+
+    render(<MyVideosPage api={api as never} search="" onUpload={vi.fn()}/>)
+    fireEvent.click(await screen.findByRole('button', { name: '检查英文字幕' }))
+    await screen.findByText('暂时无法读取完整英文字幕，请稍后重试。')
+    expect(screen.queryByText('Incomplete response.')).not.toBeInTheDocument()
+  })
+
+  it('renders a bounded read-only subtitle sample instead of a pseudo learning player', async () => {
+    const ready = {
+      ...asset,
+      transcriptProcessing: {
+        status: 'succeeded' as const, stage: 'transcript_ready' as const,
+        completedChunks: 2, totalChunks: 2, errorCode: null, updatedAt: new Date().toISOString(),
+      },
+    }
+    const cues = Array.from({ length: 13 }, (_, order) => ({
+      id: crypto.randomUUID(), order, startMs: order * 1_000, endMs: order * 1_000 + 800,
+      text: `Verified sentence ${order + 1}.`, words: [],
+    }))
+    const api = { fetchJson: vi.fn(async (path: string) => {
+      if (path === '/media-assets') return { items: [ready] }
+      if (path === `/media-assets/${ready.id}/transcript`) return {
+        id: crypto.randomUUID(), mediaAssetId: ready.id, version: 1, language: 'en', durationMs: ready.durationMs,
+        cueCount: cues.length, pipelineVersion: 'g3-transcript-v1', modelVersion: 'private-model', publishedAt: new Date().toISOString(), cues,
+      }
+      throw new Error(`unexpected ${path}`)
+    }) }
+
+    render(<MyVideosPage api={api as never} search="" onUpload={vi.fn()}/>)
+    fireEvent.click(await screen.findByRole('button', { name: '检查英文字幕' }))
+    await screen.findByText('Verified sentence 12.')
+    expect(screen.getByRole('list', { name: '完整英文字幕核验样本' })).toBeInTheDocument()
+    expect(screen.getByText(/显示前 12 句（共 13 句）/)).toBeInTheDocument()
+    expect(screen.queryByText('Verified sentence 13.')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /开始练习|下一句|循环/ })).not.toBeInTheDocument()
+  })
+
+  it('discards a late subtitle response after the user checks another media asset', async () => {
+    const first = {
+      ...asset,
+      transcriptProcessing: {
+        status: 'succeeded' as const, stage: 'transcript_ready' as const,
+        completedChunks: 1, totalChunks: 1, errorCode: null, updatedAt: new Date().toISOString(),
+      },
+    }
+    const second = { ...first, id: crypto.randomUUID(), title: 'Second long podcast', originalName: 'second.mp4' }
+    let resolveFirst: (value: unknown) => void = () => undefined
+    const firstResponse = new Promise<unknown>((resolve) => { resolveFirst = resolve })
+    const api = { fetchJson: vi.fn((path: string) => {
+      if (path === '/media-assets') return Promise.resolve({ items: [first, second] })
+      if (path === `/media-assets/${first.id}/transcript`) return firstResponse
+      if (path === `/media-assets/${second.id}/transcript`) return Promise.resolve({
+        id: crypto.randomUUID(), mediaAssetId: second.id, version: 1, language: 'en', durationMs: second.durationMs,
+        cueCount: 1, pipelineVersion: 'g3-transcript-v1', modelVersion: 'private-model', publishedAt: new Date().toISOString(),
+        cues: [{ id: crypto.randomUUID(), order: 0, startMs: 0, endMs: 1_000, text: 'Second verified subtitle.', words: [] }],
+      })
+      throw new Error(`unexpected ${path}`)
+    }) }
+
+    render(<MyVideosPage api={api as never} search="" onUpload={vi.fn()}/>)
+    const buttons = await screen.findAllByRole('button', { name: '检查英文字幕' })
+    fireEvent.click(buttons[0])
+    fireEvent.click(buttons[1])
+    resolveFirst({
+      id: crypto.randomUUID(), mediaAssetId: first.id, version: 1, language: 'en', durationMs: first.durationMs,
+      cueCount: 1, pipelineVersion: 'g3-transcript-v1', modelVersion: 'private-model', publishedAt: new Date().toISOString(),
+      cues: [{ id: crypto.randomUUID(), order: 0, startMs: 0, endMs: 1_000, text: 'Stale first subtitle.', words: [] }],
+    })
+
+    await screen.findByText('Second verified subtitle.')
+    expect(screen.queryByText('Stale first subtitle.')).not.toBeInTheDocument()
+  })
+
+  it('shows long-video handoff evidence as a stage, never as a percentage', async () => {
+    const evidencing = {
+      ...asset,
+      transcriptProcessing: {
+        status: 'processing' as const, stage: 'handoff_evidencing' as const,
+        completedChunks: 2, totalChunks: 2, errorCode: null, updatedAt: new Date().toISOString(),
+      },
+    }
+    const api = { fetchJson: vi.fn(async (path: string) => {
+      if (path === '/media-assets') return { items: [evidencing] }
+      throw new Error(`unexpected ${path}`)
+    }) }
+
+    render(<MyVideosPage api={api as never} search="" onUpload={vi.fn()}/>)
+    await screen.findByText('正在核验长视频字幕衔接')
+    expect(screen.queryByText(/\d+%/)).not.toBeInTheDocument()
+  })
+
+  it('closes the transcript sheet without closing an already open original player', async () => {
+    const ready = {
+      ...asset,
+      transcriptProcessing: {
+        status: 'succeeded' as const, stage: 'transcript_ready' as const,
+        completedChunks: 1, totalChunks: 1, errorCode: null, updatedAt: new Date().toISOString(),
+      },
+    }
+    const api = { fetchJson: vi.fn(async (path: string) => {
+      if (path === '/media-assets') return { items: [ready] }
+      if (path === `/media-assets/${ready.id}/playback-url`) return { playbackUrl: 'https://storage.test/podcast.mp4?signature=1' }
+      if (path === `/media-assets/${ready.id}/transcript`) return {
+        id: crypto.randomUUID(), mediaAssetId: ready.id, version: 1, language: 'en', durationMs: ready.durationMs,
+        cueCount: 1, pipelineVersion: 'g3-transcript-v1', modelVersion: 'private-model', publishedAt: new Date().toISOString(),
+        cues: [{ id: crypto.randomUUID(), order: 0, startMs: 0, endMs: 1_000, text: 'Verified subtitle.', words: [] }],
+      }
+      throw new Error(`unexpected ${path}`)
+    }) }
+
+    render(<MyVideosPage api={api as never} search="" onUpload={vi.fn()}/>)
+    fireEvent.click(await screen.findByRole('button', { name: '播放原片' }))
+    await waitFor(() => expect(document.querySelector('video')).not.toBeNull())
+    fireEvent.click(screen.getByRole('button', { name: '检查英文字幕' }))
+    await screen.findByText('Verified subtitle.')
+
+    fireEvent.click(screen.getByRole('button', { name: '关闭字幕' }))
+    expect(screen.queryByText('Verified subtitle.')).not.toBeInTheDocument()
+    expect(document.querySelector('video')).not.toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: '关闭播放器' }))
+    expect(document.querySelector('video')).toBeNull()
+  })
 })

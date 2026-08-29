@@ -16,6 +16,7 @@ const stageCopy: Record<string, string> = {
   audio_extracting: '正在准备视频音频',
   chunking: '正在整理长视频',
   transcribing: '正在生成英文字幕',
+  handoff_evidencing: '正在核验长视频字幕衔接',
   merging: '正在整理完整字幕',
   cue_segmenting: '正在整理句子',
   validating: '正在核验字幕完整性',
@@ -89,8 +90,8 @@ export function describeTranscript(asset: MediaAssetView): TranscriptStatusCopy 
   if (!state) {
     return {
       tone: 'waiting',
-      label: '等待英文字幕',
-      detail: '原片可播放，完整英文字幕尚未开始处理。',
+      label: '等待字幕确认',
+      detail: '原片可播放，但完整英文字幕任务尚未创建或尚未确认。',
       canCheck: false,
       retryable: false,
     }
