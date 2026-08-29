@@ -70,11 +70,12 @@ export function MyVideosPage({ api, search, onUpload }: { api: ApiClient; search
   }, [restoreFocus])
 
   const closeDetails = useCallback(() => {
+    const focusTarget = transcript ? transcriptTriggerRef.current : playbackTriggerRef.current
     transcriptRequestVersion.current += 1
     setPlayback(null)
     setTranscript(null)
-    restoreFocus(transcriptTriggerRef.current ?? playbackTriggerRef.current)
-  }, [restoreFocus])
+    restoreFocus(focusTarget)
+  }, [restoreFocus, transcript])
 
   useEffect(() => {
     if (!playback && !transcript) return undefined

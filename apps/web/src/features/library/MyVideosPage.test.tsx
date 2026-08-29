@@ -392,7 +392,8 @@ describe('G2 signed playback recovery', () => {
     expect(screen.queryByText('Verified subtitle.')).not.toBeInTheDocument()
     expect(document.querySelector('video')).not.toBeNull()
 
-    fireEvent.click(screen.getByRole('button', { name: '关闭播放器' }))
-    expect(document.querySelector('video')).toBeNull()
+    fireEvent.keyDown(window, { key: 'Escape' })
+    await waitFor(() => expect(document.querySelector('video')).toBeNull())
+    await waitFor(() => expect(screen.getByRole('button', { name: '播放原片' })).toHaveFocus())
   })
 })
