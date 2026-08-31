@@ -36,6 +36,16 @@ EchoFlow V1 是一个私人英语长视频影子学习工具：用户上传自�
 - 工作区可能包含用户未提交改动；只修改任务直接涉及的文件。
 - 同一时间只允许一个核心纵向闭环处于集成状态；可并行只读调查和互不冲突的技术子任务。
 
+## 双人 Codex 协作（重要）
+
+本仓库由**两位开发者各自的 Codex 共同维护**，必须遵守以下硬性约定，否则两台 Codex 会互相踩踏：
+
+- **同一时间只允许一个 Codex 改动 `apps/web` 或共享 `packages/*`**（`contracts`、`database`、`storage`、`config`）。另一台只做只读调查。
+- 每台 Codex 在**自己名下的 `feature/功能名` 分支**上开发，**绝不共用同一个功能分支，也不直接 push `master`**。合入 `master` 必须走 Pull Request 并经对方（或独立 review）审核。
+- 改动 `packages/database`（Prisma schema / migration）前**必须通知对方**，且两个人不要同时跑 `db:migrate`；migration 冲突由后动方在 `git pull` 后重新 `db:generate` 解决。
+- 合入 `master` 前必须通过 `pnpm build`、`pnpm lint`、`pnpm test`，且 `master` 永远保持可构建、可运行。
+- 协作流程细节见根目录 `CONTRIBUTING.md`。
+
 ## 常用命令
 
 ```powershell
